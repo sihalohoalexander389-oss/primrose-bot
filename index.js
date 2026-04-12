@@ -23,7 +23,7 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://github.com/sihalohoalexander389-oss/primrose-bot/blob/main/index.js";
-const CURRENT_VERSION = "3.0.5";
+const CURRENT_VERSION = "3.0.2";
 
 // File untuk menyimpan data
 const GROUP_PREMIUM_FILE = "./database/group_premium.json";
@@ -559,7 +559,7 @@ async function sendColoredMenu(chatId, from, color) {
 🎩 Pemilik : @ItsMeXanderRzMd 🌟    
 😄 Owner : @realmarz 🌟
 🍽 Version : 3.0 
-🗡 Platform : Telegram Kacung
+🗡 Platform : Telegram Cung
 <blockquote><b>――⧼ STATUS BOT ⧽――</b></blockquote>
 ⛧ Status : ${status}
 ⛧ Number : ${botNumber}
