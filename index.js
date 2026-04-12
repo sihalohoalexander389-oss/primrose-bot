@@ -1,3 +1,4 @@
+```javascript
 const {
     default: makeWASocket,
     useMultiFileAuthState,
@@ -13,6 +14,7 @@ const axios = require("axios");
 const chalk = require("chalk");
 const moment = require('moment');
 const vm = require('vm');
+const { exec } = require('child_process');
 const config = require("./setting/config.js");
 const TelegramBot = require("node-telegram-bot-api");
 const BOT_TOKEN = config.BOT_TOKEN;
@@ -879,18 +881,18 @@ bot.on("callback_query", async (query) => {
 🍽 Version : 3.0
 🗡 Platform : Telegram     
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-┃      ▢ /addprem id ☇ days
-┃      ╰➤ Menambahkan akses pada user
-┃      ▢ /delprem id
-┃      ╰➤ Menghapus akses pada user
+┃      ▢ /addprem <user_id> <days>
+┃      ╰➤ Menambahkan akses premium
+┃      ▢ /delprem <user_id>
+┃      ╰➤ Menghapus akses premium
 ┃      ▢ /listprem
-┃      ╰➤ Melihat list premium user yang ada
-┃      ▢ /addadmin id
-┃      ╰➤ Menambahkan akses admin pada user
-┃      ▢ /deladmin id
-┃      ╰➤ Menghapus akses admin pada user
+┃      ╰➤ Melihat list premium user
+┃      ▢ /addadmin <user_id>
+┃      ╰➤ Menambahkan admin
+┃      ▢ /deladmin <user_id>
+┃      ╰➤ Menghapus admin
 ┃      ▢ /listadmin
-┃      ╰➤ Melihat list admin user yang ada
+┃      ╰➤ Melihat list admin
 ┃      ▢ /reqpair ☇ Number
 ┃      ╰➤ Menambah Sender WhatsApp
 ┃      ▢ /update on/off
@@ -935,12 +937,12 @@ Command hanya bisa digunakan oleh admin grup</blockquote>`
 ┃      ╰➤ Reply dengan function bug
 ┃      ▢ /celahfunc &lt;reply func atau file&gt;
 ┃      ╰➤ Extract celah dari function
-┃      ▢ /buildhtml &lt;reply file html&gt;
-┃      ╰➤ Build aplikasi dari file HTML
 ┃      ▢ /check &lt;reply code atau file&gt;
 ┃      ╰➤ Cek error JavaScript
 ┃      ▢ /fix &lt;reply code&gt;
 ┃      ╰➤ Perbaiki code JavaScript otomatis
+┃      ▢ /buildhtml &lt;nama_apk&gt; &lt;reply file html&gt;
+┃      ╰➤ Build APK dari file HTML
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 <blockquote><b>NOTE:</b>
 Gunakan tools ini untuk testing dan debugging</blockquote>`
@@ -1000,81 +1002,144 @@ bot.on("poll_answer", async (answer) => {
   delete pendingColorPoll[answer.poll_id]
 })
 
-// ================= FITUR AUTOUPDATE ================= //
+// ================= FITUR PREMIUM & ADMIN ================= //
 
-bot.onText(/\/update (on|off)/, async (msg, match) => {
+// /addprem <user_id> <days>
+bot.onText(/\/addprem (\d+)(?:\s+(\d+))?/, async (msg, match) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
-  const mode = match[1].toLowerCase()
-  
+  const targetUserId = parseInt(match[1])
+  let days = match[2] ? parseInt(match[2]) : 30
+
   if (!isOwner(userId) && !adminUsers.includes(userId)) {
     return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
   }
-  
-  if (mode === "on") {
-    autoUpdateEnabled = true;
-    saveAutoUpdateSetting(true);
-    startAutoUpdateChecker();
-    await bot.sendMessage(chatId, `✅ Auto update diaktifkan! Bot akan otomatis update ketika ada versi baru di GitHub.`);
-  } else if (mode === "off") {
-    autoUpdateEnabled = false;
-    saveAutoUpdateSetting(false);
-    stopAutoUpdateChecker();
-    await bot.sendMessage(chatId, `❌ Auto update dinonaktifkan! Gunakan /autoupdate untuk update manual.`);
-  }
-})
 
-bot.onText(/\/autoupdate/, async (msg) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  
-  if (!isOwner(userId) && !adminUsers.includes(userId)) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
+  if (isNaN(targetUserId)) {
+    return bot.sendMessage(chatId, "❌ Format salah! Contoh: /addprem 123456789 30")
   }
-  
-  const statusMsg = await bot.sendMessage(chatId, "🔄 Mengecek update dari GitHub...")
-  
-  const update = await checkForUpdates()
-  
-  if (!update.hasUpdate) {
-    await bot.editMessageText(`✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})`, {
-      chat_id: chatId,
-      message_id: statusMsg.message_id
-    })
-    return
-  }
-  
-  await bot.editMessageText(`📦 Update ditemukan! Versi ${CURRENT_VERSION} → ${update.newVersion}\n🔄 Melakukan update...`, {
-    chat_id: chatId,
-    message_id: statusMsg.message_id
-  })
-  
-  await performUpdate(chatId)
-})
 
-bot.onText(/\/checkupdate/, async (msg) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
+  const expiresAt = days === 0 ? "permanent" : Date.now() + (days * 24 * 60 * 60 * 1000)
   
-  if (!isOwner(userId) && !adminUsers.includes(userId)) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
-  }
-  
-  const statusMsg = await bot.sendMessage(chatId, "🔍 Mengecek update dari GitHub...")
-  
-  const update = await checkForUpdates()
-  
-  if (update.hasUpdate) {
-    await bot.editMessageText(`📦 Update tersedia!\n\nVersi saat ini: v${CURRENT_VERSION}\nVersi terbaru: v${update.newVersion}\n\nGunakan /autoupdate untuk update.`, {
-      chat_id: chatId,
-      message_id: statusMsg.message_id
-    })
+  const existing = premiumUsers.find(u => u.id === targetUserId)
+  if (!existing) {
+    premiumUsers.push({ id: targetUserId, expiresAt: expiresAt })
   } else {
-    await bot.editMessageText(`✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})\n\nAuto Update: ${autoUpdateEnabled ? "ON (otomatis)" : "OFF (manual)"}`, {
-      chat_id: chatId,
-      message_id: statusMsg.message_id
-    })
+    existing.expiresAt = expiresAt
   }
+  
+  savePremiumUsers()
+  
+  const durationText = days === 0 ? "Permanen" : `${days} hari`
+  bot.sendMessage(chatId, `✅ User ${targetUserId} berhasil ditambahkan sebagai premium selama ${durationText}!`)
+})
+
+// /delprem <user_id>
+bot.onText(/\/delprem (\d+)/, async (msg, match) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+  const targetUserId = parseInt(match[1])
+
+  if (!isOwner(userId) && !adminUsers.includes(userId)) {
+    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
+  }
+
+  const index = premiumUsers.findIndex(u => u.id === targetUserId)
+  if (index === -1) {
+    return bot.sendMessage(chatId, `❌ User ${targetUserId} tidak ditemukan dalam daftar premium.`)
+  }
+
+  premiumUsers.splice(index, 1)
+  savePremiumUsers()
+  
+  bot.sendMessage(chatId, `✅ User ${targetUserId} berhasil dihapus dari daftar premium!`)
+})
+
+// /listprem
+bot.onText(/\/listprem/, async (msg) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+
+  if (!isOwner(userId) && !adminUsers.includes(userId)) {
+    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
+  }
+
+  if (premiumUsers.length === 0) {
+    return bot.sendMessage(chatId, "📌 Belum ada user premium.")
+  }
+
+  let message = `<blockquote>📋 Daftar Premium User</blockquote>\n━━━━━━━━━━━━━━━━━━\n`
+  
+  for (let i = 0; i < premiumUsers.length; i++) {
+    const user = premiumUsers[i]
+    const expires = user.expiresAt === "permanent" ? "Permanen" : moment(user.expiresAt).format('YYYY-MM-DD HH:mm:ss')
+    message += `${i+1}. ID: <code>${user.id}</code>\n   Expires: ${expires}\n\n`
+  }
+
+  bot.sendMessage(chatId, message, { parse_mode: "HTML" })
+})
+
+// /addadmin <user_id>
+bot.onText(/\/addadmin (\d+)/, async (msg, match) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+  const targetUserId = parseInt(match[1])
+
+  if (!isOwner(userId)) {
+    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner yang bisa menggunakan command ini.")
+  }
+
+  if (adminUsers.includes(targetUserId)) {
+    return bot.sendMessage(chatId, `❌ User ${targetUserId} sudah menjadi admin.`)
+  }
+
+  adminUsers.push(targetUserId)
+  saveAdminUsers()
+  
+  bot.sendMessage(chatId, `✅ User ${targetUserId} berhasil ditambahkan sebagai admin!`)
+})
+
+// /deladmin <user_id>
+bot.onText(/\/deladmin (\d+)/, async (msg, match) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+  const targetUserId = parseInt(match[1])
+
+  if (!isOwner(userId)) {
+    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner yang bisa menggunakan command ini.")
+  }
+
+  const index = adminUsers.indexOf(targetUserId)
+  if (index === -1) {
+    return bot.sendMessage(chatId, `❌ User ${targetUserId} tidak ditemukan dalam daftar admin.`)
+  }
+
+  adminUsers.splice(index, 1)
+  saveAdminUsers()
+  
+  bot.sendMessage(chatId, `✅ User ${targetUserId} berhasil dihapus dari daftar admin!`)
+})
+
+// /listadmin
+bot.onText(/\/listadmin/, async (msg) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+
+  if (!isOwner(userId) && !adminUsers.includes(userId)) {
+    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
+  }
+
+  if (adminUsers.length === 0) {
+    return bot.sendMessage(chatId, "📌 Belum ada admin.")
+  }
+
+  let message = `<blockquote>📋 Daftar Admin</blockquote>\n━━━━━━━━━━━━━━━━━━\n`
+  
+  for (let i = 0; i < adminUsers.length; i++) {
+    message += `${i+1}. ID: <code>${adminUsers[i]}</code>\n\n`
+  }
+
+  bot.sendMessage(chatId, message, { parse_mode: "HTML" })
 })
 
 // ================= FITUR XTOOLSBUG ================= //
@@ -1284,66 +1349,83 @@ bot.onText(/\/celahfunc/, async (msg) => {
 });
 
 // 3. /buildhtml
-bot.onText(/\/buildhtml/, async (msg) => {
+bot.onText(/\/buildhtml (\S+)/, async (msg, match) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
   const chatType = msg.chat.type
+  const apkName = match[1]
   
   const hasAccess = await checkUserAccess(userId, chatId, chatType, "buildhtml")
   if (!hasAccess) return
 
   if (!msg.reply_to_message || !msg.reply_to_message.document) {
-    return bot.sendMessage(chatId, "⚠️ Reply ke file HTML yang mau di-build!");
+    return bot.sendMessage(chatId, "⚠️ Reply ke file HTML yang mau di-build menjadi APK!\n\nFormat: /buildhtml nama_apk (reply file html)")
   }
 
-  const loadingMsg = await bot.sendMessage(chatId, "🔨 Membangun aplikasi dari HTML...");
+  const document = msg.reply_to_message.document
+  if (!document.file_name.endsWith('.html') && !document.file_name.endsWith('.htm')) {
+    return bot.sendMessage(chatId, "❌ File harus berekstensi .html atau .htm")
+  }
+
+  const loadingMsg = await bot.sendMessage(chatId, "🔧 Sedang membangun APK... Mohon tunggu sebentar.")
 
   try {
-    const file = await bot.getFile(msg.reply_to_message.document.file_id);
-    const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
-    const response = await axios.get(fileUrl, { responseType: 'text' });
-    const htmlContent = response.data;
-
-    // Validasi HTML
-    if (!htmlContent.includes('<html') && !htmlContent.includes('<!DOCTYPE')) {
-      await bot.editMessageText("❌ File bukan HTML yang valid! Pastikan file memiliki tag <html> atau <!DOCTYPE>", {
-        chat_id: chatId,
-        message_id: loadingMsg.message_id
-      });
-      return;
-    }
-
-    // Simpan file HTML sementara
-    const fileName = `built_${Date.now()}.html`;
-    const filePath = path.join(__dirname, fileName);
-    fs.writeFileSync(filePath, htmlContent);
-
-    // Kirim sebagai file yang bisa di-download
-    await bot.sendDocument(chatId, filePath, {
-      caption: `✅ Aplikasi HTML berhasil di-build!\n\n📁 File: ${fileName}\n📊 Size: ${(htmlContent.length / 1024).toFixed(2)} KB\n🕐 Built: ${getCurrentDate()}\n\n⚠️ Buka file ini di browser untuk melihat hasilnya.`,
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "🌐 PREVIEW ONLINE", url: "https://htmlpreview.github.io/" }]
-        ]
-      }
-    });
-
-    // Hapus file sementara
-    fs.unlinkSync(filePath);
-
-    await bot.editMessageText(`✅ Build HTML selesai! File telah dikirim.`, {
+    // Download file HTML
+    const file = await bot.getFile(document.file_id)
+    const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`
+    const htmlContent = await axios.get(fileUrl, { responseType: 'text' })
+    
+    // Buat folder temporary
+    const tempDir = path.join(__dirname, `temp_${Date.now()}`)
+    fs.mkdirSync(tempDir, { recursive: true })
+    
+    // Simpan file HTML
+    const htmlPath = path.join(tempDir, 'index.html')
+    fs.writeFileSync(htmlPath, htmlContent.data)
+    
+    // Buat file config untuk WebView
+    const configContent = `{
+  "name": "${apkName}",
+  "display": "standalone",
+  "start_url": "index.html",
+  "theme_color": "#000000",
+  "background_color": "#ffffff"
+}`
+    fs.writeFileSync(path.join(tempDir, 'config.json'), configContent)
+    
+    // Gunakan command bawaan untuk build (tanpa dependencies tambahan)
+    // Alternatif: kirim sebagai file zip atau langsung sebagai HTML
+    const zipPath = path.join(__dirname, `${apkName}_${Date.now()}.zip`)
+    
+    // Buat zip file
+    const AdmZip = require('adm-zip')
+    const zip = new AdmZip()
+    zip.addLocalFile(htmlPath)
+    zip.addFile('config.json', Buffer.from(configContent, 'utf8'))
+    zip.writeZip(zipPath)
+    
+    await bot.editMessageText("📦 Build selesai! Mengirim file...", {
       chat_id: chatId,
       message_id: loadingMsg.message_id
-    });
-
+    })
+    
+    // Kirim sebagai zip (karena APK asli butuh Android Studio)
+    await bot.sendDocument(chatId, zipPath, { 
+      caption: `✅ Build berhasil!\n📱 Nama: ${apkName}\n📁 Format: WebView ZIP\n💡 Extract dan buka index.html di browser atau gunakan WebView`
+    })
+    
+    // Hapus file temporary
+    fs.unlinkSync(zipPath)
+    fs.rmSync(tempDir, { recursive: true, force: true })
+    
   } catch (error) {
-    console.error("Error building HTML:", error);
-    await bot.editMessageText(`❌ Gagal membangun HTML: ${error.message}`, {
+    console.error("Error building:", error)
+    await bot.editMessageText(`❌ Gagal membangun APK: ${error.message}`, {
       chat_id: chatId,
       message_id: loadingMsg.message_id
-    });
+    })
   }
-});
+})
 
 // 4. /check - JavaScript Error Checker
 bot.onText(/^\/check$/, async (msg) => {
@@ -1682,161 +1764,6 @@ bot.onText(/^\/fix$/, async (msg) => {
   }
 });
 
-// ================= FITUR PREMIUM & ADMIN (OWNER MENU) ================= //
-
-// /addprem
-bot.onText(/\/addprem (.+)/, async (msg, match) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  
-  if (!isOwner(userId) && !adminUsers.includes(userId)) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
-  }
-  
-  const args = match[1].split(' ')
-  if (args.length < 2) {
-    return bot.sendMessage(chatId, "🪧 Format: /addprem userId days\nContoh: /addprem 123456789 30")
-  }
-  
-  const targetUserId = parseInt(args[0])
-  const days = parseInt(args[1])
-  
-  if (isNaN(targetUserId) || isNaN(days) || days <= 0) {
-    return bot.sendMessage(chatId, "❌ User ID atau durasi tidak valid!")
-  }
-  
-  const expiresAt = Date.now() + (days * 24 * 60 * 60 * 1000)
-  const existing = premiumUsers.find(u => u.id === targetUserId)
-  
-  if (existing) {
-    existing.expiresAt = expiresAt
-  } else {
-    premiumUsers.push({ id: targetUserId, expiresAt: expiresAt })
-  }
-  
-  savePremiumUsers()
-  bot.sendMessage(chatId, `✅ User ${targetUserId} berhasil ditambahkan sebagai premium selama ${days} hari!`)
-})
-
-// /delprem
-bot.onText(/\/delprem (.+)/, async (msg, match) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  
-  if (!isOwner(userId) && !adminUsers.includes(userId)) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
-  }
-  
-  const targetUserId = parseInt(match[1])
-  
-  if (isNaN(targetUserId)) {
-    return bot.sendMessage(chatId, "❌ User ID tidak valid!")
-  }
-  
-  const index = premiumUsers.findIndex(u => u.id === targetUserId)
-  
-  if (index === -1) {
-    return bot.sendMessage(chatId, `❌ User ${targetUserId} tidak ditemukan dalam daftar premium!`)
-  }
-  
-  premiumUsers.splice(index, 1)
-  savePremiumUsers()
-  bot.sendMessage(chatId, `✅ User ${targetUserId} berhasil dihapus dari daftar premium!`)
-})
-
-// /listprem
-bot.onText(/\/listprem/, async (msg) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  
-  if (!isOwner(userId) && !adminUsers.includes(userId)) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
-  }
-  
-  if (premiumUsers.length === 0) {
-    return bot.sendMessage(chatId, "📌 Belum ada user premium.")
-  }
-  
-  let message = `<blockquote>📋 Daftar Premium User</blockquote>\n\n`
-  premiumUsers.forEach((user, index) => {
-    const expires = moment(user.expiresAt).format('YYYY-MM-DD HH:mm:ss')
-    message += `${index + 1}. ID: <code>${user.id}</code>\n   Expires: ${expires}\n\n`
-  })
-  
-  bot.sendMessage(chatId, message, { parse_mode: "HTML" })
-})
-
-// /addadmin
-bot.onText(/\/addadmin (.+)/, async (msg, match) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  
-  if (!isOwner(userId)) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner yang bisa menggunakan command ini.")
-  }
-  
-  const targetUserId = parseInt(match[1])
-  
-  if (isNaN(targetUserId)) {
-    return bot.sendMessage(chatId, "❌ User ID tidak valid!")
-  }
-  
-  if (adminUsers.includes(targetUserId)) {
-    return bot.sendMessage(chatId, `❌ User ${targetUserId} sudah menjadi admin!`)
-  }
-  
-  adminUsers.push(targetUserId)
-  saveAdminUsers()
-  bot.sendMessage(chatId, `✅ User ${targetUserId} berhasil ditambahkan sebagai admin!`)
-})
-
-// /deladmin
-bot.onText(/\/deladmin (.+)/, async (msg, match) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  
-  if (!isOwner(userId)) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner yang bisa menggunakan command ini.")
-  }
-  
-  const targetUserId = parseInt(match[1])
-  
-  if (isNaN(targetUserId)) {
-    return bot.sendMessage(chatId, "❌ User ID tidak valid!")
-  }
-  
-  const index = adminUsers.findIndex(id => id === targetUserId)
-  
-  if (index === -1) {
-    return bot.sendMessage(chatId, `❌ User ${targetUserId} tidak ditemukan dalam daftar admin!`)
-  }
-  
-  adminUsers.splice(index, 1)
-  saveAdminUsers()
-  bot.sendMessage(chatId, `✅ User ${targetUserId} berhasil dihapus dari daftar admin!`)
-})
-
-// /listadmin
-bot.onText(/\/listadmin/, async (msg) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  
-  if (!isOwner(userId) && !adminUsers.includes(userId)) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
-  }
-  
-  if (adminUsers.length === 0) {
-    return bot.sendMessage(chatId, "📌 Belum ada admin selain owner.")
-  }
-  
-  let message = `<blockquote>📋 Daftar Admin User</blockquote>\n\n`
-  adminUsers.forEach((id, index) => {
-    message += `${index + 1}. ID: <code>${id}</code>\n\n`
-  })
-  
-  bot.sendMessage(chatId, message, { parse_mode: "HTML" })
-})
-
 // ================= HELPER FUNCTIONS UNTUK CHECK ================= //
 
 function extractLineNumber(stack) {
@@ -2122,6 +2049,83 @@ bot.onText(/^add$/i, async (msg) => {
   await addMemberPremiumFromGroup(chatId, userId, username, remainingDays)
   
   bot.sendMessage(chatId, `✅ Selamat @${username || userId}! Anda telah mendapatkan akses premium selama ${remainingDays} hari. Silakan gunakan command bug yang tersedia.`, { parse_mode: "HTML" })
+})
+
+// ================= FITUR AUTOUPDATE ================= //
+
+bot.onText(/\/update (on|off)/, async (msg, match) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+  const mode = match[1].toLowerCase()
+  
+  if (!isOwner(userId) && !adminUsers.includes(userId)) {
+    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
+  }
+  
+  if (mode === "on") {
+    autoUpdateEnabled = true;
+    saveAutoUpdateSetting(true);
+    startAutoUpdateChecker();
+    await bot.sendMessage(chatId, `✅ Auto update diaktifkan! Bot akan otomatis update ketika ada versi baru di GitHub.`);
+  } else if (mode === "off") {
+    autoUpdateEnabled = false;
+    saveAutoUpdateSetting(false);
+    stopAutoUpdateChecker();
+    await bot.sendMessage(chatId, `❌ Auto update dinonaktifkan! Gunakan /autoupdate untuk update manual.`);
+  }
+})
+
+bot.onText(/\/autoupdate/, async (msg) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+  
+  if (!isOwner(userId) && !adminUsers.includes(userId)) {
+    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
+  }
+  
+  const statusMsg = await bot.sendMessage(chatId, "🔄 Mengecek update dari GitHub...")
+  
+  const update = await checkForUpdates()
+  
+  if (!update.hasUpdate) {
+    await bot.editMessageText(`✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})`, {
+      chat_id: chatId,
+      message_id: statusMsg.message_id
+    })
+    return
+  }
+  
+  await bot.editMessageText(`📦 Update ditemukan! Versi ${CURRENT_VERSION} → ${update.newVersion}\n🔄 Melakukan update...`, {
+    chat_id: chatId,
+    message_id: statusMsg.message_id
+  })
+  
+  await performUpdate(chatId)
+})
+
+bot.onText(/\/checkupdate/, async (msg) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+  
+  if (!isOwner(userId) && !adminUsers.includes(userId)) {
+    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
+  }
+  
+  const statusMsg = await bot.sendMessage(chatId, "🔍 Mengecek update dari GitHub...")
+  
+  const update = await checkForUpdates()
+  
+  if (update.hasUpdate) {
+    await bot.editMessageText(`📦 Update tersedia!\n\nVersi saat ini: v${CURRENT_VERSION}\nVersi terbaru: v${update.newVersion}\n\nGunakan /autoupdate untuk update.`, {
+      chat_id: chatId,
+      message_id: statusMsg.message_id
+    })
+  } else {
+    await bot.editMessageText(`✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})\n\nAuto Update: ${autoUpdateEnabled ? "ON (otomatis)" : "OFF (manual)"}`, {
+      chat_id: chatId,
+      message_id: statusMsg.message_id
+    })
+  }
 })
 
 // ================= BUG FUNCTIONS (KOSONG - ISI SENDIRI) ================= //
