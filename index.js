@@ -24,7 +24,7 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.7";
+const CURRENT_VERSION = "3.0.8";
 const AUTO_UPDATE_FILE = "./database/auto_update.json";
 
 // Load auto update setting
@@ -1464,42 +1464,38 @@ bot.onText(/\/celahfunc/, async (msg) => {
   await bot.sendMessage(chatId, response, { parse_mode: "HTML" });
 });
 
-// 3. /brat
+// 3. Fitur /brat - Membuat stiker BRAT dari teks
 bot.onText(/\/brat (.+)/, async (msg, match) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  const chatType = msg.chat.type
-  const text = match[1]
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const chatType = msg.chat.type;
+  const text = match[1];
   
-  const hasAccess = await checkUserAccess(userId, chatId, chatType, "brat")
-  if (!hasAccess) return
+  const hasAccess = await checkUserAccess(userId, chatId, chatType, "brat");
+  if (!hasAccess) return;
   
-  const loadingMsg = await bot.sendMessage(chatId, "🎨 Membuat stiker BRAT...")
+  const loadingMsg = await bot.sendMessage(chatId, "🎨 Membuat stiker BRAT...");
   
   try {
-    const stickerBuffer = await createBratSticker(text)
+    const apiURL = `https://api.zenzxz.my.id/maker/brat?text=${encodeURIComponent(text)}`;
     
-    if (!stickerBuffer) {
-      return bot.editMessageText("❌ Gagal membuat stiker. Coba lagi nanti.", {
-        chat_id: chatId,
-        message_id: loadingMsg.message_id
-      })
-    }
+    const response = await axios.get(apiURL, { responseType: "arraybuffer" });
+    const stickerBuffer = Buffer.from(response.data);
     
-    await bot.deleteMessage(chatId, loadingMsg.message_id)
+    await bot.deleteMessage(chatId, loadingMsg.message_id);
     
-    await bot.sendPhoto(chatId, stickerBuffer, {
+    await bot.sendSticker(chatId, stickerBuffer, {
       caption: `✨ Stiker BRAT: "${text}"`
-    })
+    });
     
   } catch (error) {
-    console.error("Error in /brat:", error.message)
-    await bot.editMessageText("❌ Terjadi kesalahan saat membuat stiker.", {
+    console.error("Error in /brat:", error.message);
+    await bot.editMessageText("❌ Gagal membuat stiker. Coba lagi nanti.", {
       chat_id: chatId,
       message_id: loadingMsg.message_id
-    })
+    });
   }
-})
+});
 
 // ================= FITUR CHECK & FIX ================= //
 
