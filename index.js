@@ -12,6 +12,7 @@ const sessions = new Map();
 const axios = require("axios");
 const chalk = require("chalk");
 const moment = require('moment');
+const vm = require('vm');
 const config = require("./setting/config.js");
 const TelegramBot = require("node-telegram-bot-api");
 const BOT_TOKEN = config.BOT_TOKEN;
@@ -23,7 +24,7 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.3";
+const CURRENT_VERSION = "3.0.4";
 const AUTO_UPDATE_FILE = "./database/auto_update.json";
 
 // Load auto update setting
@@ -144,7 +145,6 @@ async function checkForUpdates() {
         const response = await axios.get(GITHUB_RAW_URL, { timeout: 10000 });
         const remoteContent = response.data;
         
-        // Cek versi (cari CURRENT_VERSION di file remote)
         const remoteVersionMatch = remoteContent.match(/CURRENT_VERSION = "([^"]+)"/);
         const remoteVersion = remoteVersionMatch ? remoteVersionMatch[1] : "unknown";
         
@@ -161,7 +161,7 @@ async function checkForUpdates() {
     }
 }
 
-// Fungsi untuk melakukan update (langsung replace file, tanpa backup)
+// Fungsi untuk melakukan update
 async function performUpdate(chatId) {
     try {
         const update = await checkForUpdates();
@@ -173,7 +173,6 @@ async function performUpdate(chatId) {
             return false;
         }
         
-        // Tulis file baru langsung (tanpa backup)
         fs.writeFileSync(__filename, update.content);
         console.log(chalk.green("✅ File index.js berhasil diupdate!"));
         
@@ -181,7 +180,6 @@ async function performUpdate(chatId) {
             await bot.sendMessage(chatId, `✅ Update berhasil! Versi ${CURRENT_VERSION} → ${update.newVersion}\n🔄 Bot akan restart dalam 3 detik...`);
         }
         
-        // Restart bot
         setTimeout(() => {
             process.exit(0);
         }, 3000);
@@ -196,7 +194,7 @@ async function performUpdate(chatId) {
     }
 }
 
-// Fungsi auto update berkala (setiap 1 jam)
+// Auto update checker
 let autoUpdateInterval = null;
 
 function startAutoUpdateChecker() {
@@ -214,7 +212,7 @@ function startAutoUpdateChecker() {
             console.log(chalk.yellow(`📦 Auto update ditemukan! Versi ${CURRENT_VERSION} → ${update.newVersion}`));
             await performUpdate(null);
         }
-    }, 60 * 60 * 1000); // Cek setiap 1 jam
+    }, 60 * 60 * 1000);
 }
 
 function stopAutoUpdateChecker() {
@@ -537,7 +535,6 @@ let discoActive = false
 let currentStyleIndex = 0
 const buttonStyles = ["primary", "success", "danger"]
 
-// Fungsi untuk mendapatkan style berdasarkan pilihan warna
 function getButtonStyle(color) {
     switch(color) {
         case "danger": return "danger";
@@ -549,7 +546,6 @@ function getButtonStyle(color) {
     }
 }
 
-// Fungsi untuk mendapatkan warna dari pilihan polling
 function getColorFromChoice(choice) {
     switch(choice) {
         case "XRED": return "danger";
@@ -561,7 +557,6 @@ function getColorFromChoice(choice) {
     }
 }
 
-// Fungsi untuk mengirim menu dengan warna tertentu
 async function sendColoredMenu(chatId, from, color) {
   const userId = from.id
   const randomImage = getRandomImage()
@@ -581,24 +576,29 @@ async function sendColoredMenu(chatId, from, color) {
         style: buttonStyle
       },
       {
-        text: "XSETTINGS",
-        callback_data: "owner_menu",
+        text: "XTOOLSBUG",
+        callback_data: "toolsbug_menu",
         style: buttonStyle
       }
     ],
     [
+      {
+        text: "XSETTINGS",
+        callback_data: "owner_menu",
+        style: buttonStyle
+      },
       {
         text: "XGROUPSECURITY",
         callback_data: "group_security_menu",
         style: buttonStyle
-      },
+      }
+    ],
+    [
       {
         text: "XCHANGECOLOR",
         callback_data: "change_color_menu",
         style: buttonStyle
-      }
-    ],
-    [
+      },
       {
         text: "DEVELOPERS",
         url: "https://t.me/ItsMeXanderRzMd",
@@ -613,7 +613,7 @@ async function sendColoredMenu(chatId, from, color) {
 
   const caption = `<blockquote><strong>☠ # Primrose Linux Bot 𖣂 ☠</strong></blockquote>
 🎩 Pemilik : @ItsMeXanderRzMd 🌟    
-😄 Owner : @realmarz 👀
+😄 Owner : @realmarz 🌟
 🍽 Version : 3.0 
 🗡 Platform : Telegram
 <blockquote><b>――⧼ STATUS BOT ⧽――</b></blockquote>
@@ -655,24 +655,29 @@ async function sendColoredMenu(chatId, from, color) {
             style: newStyle
           },
           {
-            text: "XSETTINGS",
-            callback_data: "owner_menu",
+            text: "XTOOLSBUG",
+            callback_data: "toolsbug_menu",
             style: newStyle
           }
         ],
         [
+          {
+            text: "XSETTINGS",
+            callback_data: "owner_menu",
+            style: newStyle
+          },
           {
             text: "XGROUPSECURITY",
             callback_data: "group_security_menu",
             style: newStyle
-          },
+          }
+        ],
+        [
           {
             text: "XCHANGECOLOR",
             callback_data: "change_color_menu",
             style: newStyle
-          }
-        ],
-        [
+          },
           {
             text: "DEVELOPERS",
             url: "https://t.me/ItsMeXanderRzMd",
@@ -724,12 +729,10 @@ function isPremium(userId) {
   return Date.now() < user.expiresAt
 }
 
-// Fungsi untuk mengecek apakah command diblokir
 function isCommandBlocked(commandName) {
   return blockedCommands.includes(commandName.toLowerCase());
 }
 
-// Fungsi untuk menambah grup premium
 async function addGroupPremium(chatId, days, userId) {
   const chat = await bot.getChat(chatId);
   const groupId = chatId.toString();
@@ -757,7 +760,6 @@ async function addGroupPremium(chatId, days, userId) {
   return true;
 }
 
-// Fungsi untuk menghapus grup premium
 function removeGroupPremium(chatId) {
   const groupId = chatId.toString();
   groupPremiumData = groupPremiumData.filter(g => g.groupId !== groupId);
@@ -765,7 +767,6 @@ function removeGroupPremium(chatId) {
   return true;
 }
 
-// Fungsi untuk menambah member premium dari grup
 async function addMemberPremiumFromGroup(chatId, userId, username, days) {
   const groupId = chatId.toString();
   const group = groupPremiumData.find(g => g.groupId === groupId);
@@ -799,7 +800,6 @@ async function addMemberPremiumFromGroup(chatId, userId, username, days) {
   return true;
 }
 
-// Handler untuk polling change color
 const pendingColorPoll = {};
 
 bot.onText(/\/start/, async (msg) => {
@@ -925,6 +925,24 @@ Command hanya bisa digunakan oleh admin grup</blockquote>`
     replyMarkup = {
       inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]]
     }
+  } else if (data === "toolsbug_menu") {
+    caption = `<blockquote><b>🛠️ XTOOLSBUG MENU 🛠️</b></blockquote>
+🎩 Pemilik : @ItsMeXanderRzMd 🌟
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃      ▢ /testfunction &lt;number&gt; &lt;jumlah&gt;
+┃      ╰➤ Reply dengan function bug
+┃      ▢ /celahfunc &lt;reply func atau file&gt;
+┃      ╰➤ Extract celah dari function
+┃      ▢ /check &lt;reply code atau file&gt;
+┃      ╰➤ Cek error JavaScript
+┃      ▢ /fix &lt;reply code&gt;
+┃      ╰➤ Perbaiki code JavaScript otomatis
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<blockquote><b>NOTE:</b>
+Gunakan tools ini untuk testing dan debugging</blockquote>`
+    replyMarkup = {
+      inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]]
+    }
   } else if (data === "change_color_menu") {
     const options = ["🔴 XRED", "🔵 XBLUE", "🟢 XGREEN", "⚪ XWHITE", "🌈 XDISCO"]
     
@@ -956,7 +974,6 @@ Command hanya bisa digunakan oleh admin grup</blockquote>`
   await bot.answerCallbackQuery(query.id)
 })
 
-// Handler untuk polling change color
 bot.on("poll_answer", async (answer) => {
   const pollData = pendingColorPoll[answer.poll_id]
   if (!pollData) return
@@ -981,7 +998,6 @@ bot.on("poll_answer", async (answer) => {
 
 // ================= FITUR AUTOUPDATE ================= //
 
-// Command /update on/off - Mengaktifkan/menonaktifkan auto update
 bot.onText(/\/update (on|off)/, async (msg, match) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1004,7 +1020,6 @@ bot.onText(/\/update (on|off)/, async (msg, match) => {
   }
 })
 
-// Command /autoupdate - Update manual dari GitHub
 bot.onText(/\/autoupdate/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1033,7 +1048,6 @@ bot.onText(/\/autoupdate/, async (msg) => {
   await performUpdate(chatId)
 })
 
-// Command /checkupdate - Cek update tanpa update
 bot.onText(/\/checkupdate/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1059,9 +1073,675 @@ bot.onText(/\/checkupdate/, async (msg) => {
   }
 })
 
+// ================= FITUR XTOOLSBUG ================= //
+
+// 1. /testfunction
+bot.onText(/\/testfunction(?:\s+(\d+)\s+(\d+))?/, async (msg, match) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+  const chatType = msg.chat.type
+  
+  const hasAccess = await checkUserAccess(userId, chatId, chatType, "testfunction")
+  if (!hasAccess) return
+
+  try {
+    const args = msg.text.split(" ");
+    if (args.length < 3) {
+      return bot.sendMessage(chatId, "🪧 Example : /testfunction 62xxx 10 (reply function)");
+    }
+
+    const q = args[1];
+    let jumlah = Math.max(0, Math.min(parseInt(args[2]) || 1, 1000));
+
+    if (isNaN(jumlah) || jumlah <= 0) {
+      return bot.sendMessage(chatId, "❌ Jumlah harus angka");
+    }
+
+    const target = q.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
+
+    if (!msg.reply_to_message || !msg.reply_to_message.text) {
+      return bot.sendMessage(chatId, "❌ Reply dengan function");
+    }
+
+    const captionProcess = `
+<blockquote><pre>⬡═―—⊱ ⎧ PRIMROSE BOT ⎭ ⊰―—═⬡</pre></blockquote>
+▢ Target: ${q}
+▢ Type: Unknown Func
+▢ Status: Process Bug
+╘═——————————————═⬡
+`;
+
+    let processMsg;
+    
+    try {
+      processMsg = await bot.sendPhoto(chatId, getRandomImage(), {
+        caption: captionProcess,
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "📱 CEK TARGET", url: `https://wa.me/${q}` }]
+          ]
+        }
+      });
+    } catch {
+      processMsg = await bot.sendMessage(chatId, captionProcess, {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "📱 CEK TARGET", url: `https://wa.me/${q}` }]
+          ]
+        }
+      });
+    }
+
+    const processMessageId = processMsg.message_id;
+
+    const safeSock = sessions.values().next().value;
+    if (!safeSock) {
+      return bot.sendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    }
+    
+    const funcCode = msg.reply_to_message.text;
+
+    const matchFunc = funcCode.match(/async function\s+(\w+)/);
+    if (!matchFunc) {
+      return bot.sendMessage(chatId, "❌ Function tidak valid");
+    }
+
+    const funcName = matchFunc[1];
+
+    const sandbox = {
+      console,
+      Buffer,
+      sock: safeSock,
+      target,
+      sleep,
+      generateWAMessageFromContent,
+    };
+
+    const context = vm.createContext(sandbox);
+
+    const wrapper = `${funcCode}\n${funcName}(sock, target)`;
+    
+    for (let i = 0; i < jumlah; i++) {
+      try {
+        vm.runInContext(wrapper, context);
+      } catch (err) {
+        console.error("Error executing function:", err.message);
+      }
+      await sleep(200);
+    }
+
+    const finalText = `
+<blockquote><pre>⬡═―—⊱ ⎧ PRIMROSE BOT ⎭ ⊰―—═⬡</pre></blockquote>
+▢ Target: ${q}
+▢ Type: Unknown Func
+▢ Status: Success Bug
+╘═——————————————═⬡
+`;
+
+    try {
+      await bot.editMessageCaption(
+        chatId,
+        processMessageId,
+        null,
+        finalText,
+        {
+          parse_mode: "HTML",
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "📱 CEK TARGET", url: `https://wa.me/${q}` }]
+            ]
+          }
+        }
+      );
+    } catch {
+      await bot.sendMessage(chatId, finalText, {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "📱 CEK TARGET", url: `https://wa.me/${q}` }]
+          ]
+        }
+      });
+    }
+
+  } catch (err) {
+    console.error(err);
+    bot.sendMessage(chatId, "❌ Error terjadi");
+  }
+});
+
+// 2. /celahfunc
+bot.onText(/\/celahfunc/, async (msg) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+  const chatType = msg.chat.type
+  
+  const hasAccess = await checkUserAccess(userId, chatId, chatType, "celahfunc")
+  if (!hasAccess) return
+
+  if (!msg.reply_to_message || (!msg.reply_to_message.text && !msg.reply_to_message.document)) {
+    return bot.sendMessage(chatId, "⚠️ Reply ke function atau file JavaScript yang mau diambil celahnya!");
+  }
+
+  let code = '';
+  
+  if (msg.reply_to_message.text) {
+    code = msg.reply_to_message.text;
+  } else if (msg.reply_to_message.document) {
+    const file = await bot.getFile(msg.reply_to_message.document.file_id);
+    const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
+    const response = await axios.get(fileUrl, { responseType: 'text' });
+    code = response.data;
+  }
+
+  // Extract message structure patterns
+  const patterns = {
+    'newsletterAdminInviteMessage': /newsletterAdminInviteMessage\s*:\s*{([^}]+)}/gs,
+    'interactiveResponseMessage': /interactiveResponseMessage\s*:\s*{([^}]+)}/gs,
+    'viewOnceMessage': /viewOnceMessage\s*:\s*{([^}]+)}/gs,
+    'stickerMessage': /stickerMessage\s*:\s*{([^}]+)}/gs,
+    'videoMessage': /videoMessage\s*:\s*{([^}]+)}/gs,
+    'contactMessage': /contactMessage\s*:\s*{([^}]+)}/gs,
+    'groupStatusMessageV2': /groupStatusMessageV2\s*:\s*{([^}]+)}/gs,
+    'interactiveMessage': /interactiveMessage\s*:\s*{([^}]+)}/gs,
+    'nativeFlowMessage': /nativeFlowMessage\s*:\s*{([^}]+)}/gs,
+    'buttons': /buttons\s*:\s*\[([^\]]+)\]/gs,
+    'contextInfo': /contextInfo\s*:\s*{([^}]+)}/gs
+  };
+
+  let results = [];
+  
+  for (const [type, pattern] of Object.entries(patterns)) {
+    const matches = code.matchAll(pattern);
+    for (const match of matches) {
+      results.push({
+        type: type,
+        content: match[0].trim()
+      });
+    }
+  }
+
+  if (results.length === 0) {
+    return bot.sendMessage(chatId, "❌ Tidak ditemukan celah/pattern dalam code!");
+  }
+
+  let response = `<blockquote>🔍 CELAH DITEMUKAN</blockquote>\n\n`;
+  response += `Total: ${results.length} celah\n━━━━━━━━━━━━━━━━━━\n\n`;
+  
+  for (let i = 0; i < Math.min(results.length, 10); i++) {
+    response += `<b>${i+1}. Type: ${results[i].type}</b>\n`;
+    response += `<code>${results[i].content.substring(0, 800)}</code>\n`;
+    if (results[i].content.length > 800) response += `\n... (${results[i].content.length - 800} chars terpotong)\n`;
+    response += `━━━━━━━━━━━━━━━━━━\n\n`;
+  }
+
+  await bot.sendMessage(chatId, response, { parse_mode: "HTML" });
+});
+
+// 3. /check - JavaScript Error Checker
+bot.onText(/^\/check$/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id
+    const chatType = msg.chat.type
+  
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "check")
+    if (!hasAccess) return
+    
+    if (!msg.reply_to_message) {
+        return bot.sendMessage(chatId, 
+            "⚠️ *CARA PAKE:*\n" +
+            "1. Kirim code JavaScript\n" +
+            "2. Reply code tersebut\n" +
+            "3. Ketik /check\n\n" +
+            "Atau langsung:\n" +
+            "`/check [code kamu disini]`", 
+            { parse_mode: 'Markdown' }
+        );
+    }
+    
+    let code = '';
+    
+    if (msg.reply_to_message.text) {
+        code = msg.reply_to_message.text;
+    } else if (msg.reply_to_message.document) {
+        const file = await bot.getFile(msg.reply_to_message.document.file_id);
+        const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
+        const response = await axios.get(fileUrl, { responseType: 'text' });
+        code = response.data;
+    } else {
+        return bot.sendMessage(chatId, "❌ Reply ke code JavaScript yang mau dicek!");
+    }
+    
+    await checkJavaScript(chatId, code);
+});
+
+bot.onText(/\/check (.+)/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id
+    const chatType = msg.chat.type
+  
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "check")
+    if (!hasAccess) return
+    
+    const code = match[1];
+    await checkJavaScript(chatId, code);
+});
+
+async function checkJavaScript(chatId, code) {
+    const loadingMsg = await bot.sendMessage(chatId, "🔍 *Menganalisis JavaScript...*", { parse_mode: 'Markdown' });
+    
+    const result = {
+        hasError: false,
+        errors: [],
+        warnings: [],
+        suggestions: [],
+        syntaxHighlight: ''
+    };
+    
+    try {
+        new Function(code);
+    } catch (err) {
+        result.hasError = true;
+        result.errors.push({
+            message: err.message,
+            stack: err.stack,
+            line: extractLineNumber(err.stack),
+            column: extractColumnNumber(err.stack)
+        });
+    }
+    
+    const undefinedVars = detectUndefinedVariables(code);
+    if (undefinedVars.length > 0) {
+        result.warnings.push({
+            type: 'Undefined Variable',
+            message: `Variable mungkin belum dideklarasi: ${undefinedVars.join(', ')}`,
+            suggestion: 'Deklarasikan variable dengan let, const, atau var sebelum digunakan.'
+        });
+    }
+    
+    const missingSemi = detectMissingSemicolon(code);
+    if (missingSemi.length > 0) {
+        result.warnings.push({
+            type: 'Missing Semicolon',
+            message: `Baris ${missingSemi.join(', ')} mungkin butuh semicolon (;)`,
+            suggestion: 'Tambahkan ; di akhir statement untuk menghindari ASI issues.'
+        });
+    }
+    
+    const unusedVars = detectUnusedVariables(code);
+    if (unusedVars.length > 0) {
+        result.warnings.push({
+            type: 'Unused Variable',
+            message: `Variable tidak terpakai: ${unusedVars.join(', ')}`,
+            suggestion: 'Hapus variable yang tidak digunakan atau gunakan.'
+        });
+    }
+    
+    if (code.includes('console.log')) {
+        result.warnings.push({
+            type: 'Console Statement',
+            message: 'Ditemukan console.log di code',
+            suggestion: 'Hapus console.log untuk production code.'
+        });
+    }
+    
+    if (code.includes('eval(')) {
+        result.warnings.push({
+            type: 'Eval Usage',
+            message: 'Menggunakan eval() yang berbahaya',
+            suggestion: 'Hindari eval() karena security risk dan performance issue.'
+        });
+    }
+    
+    if (code.includes('debugger;')) {
+        result.warnings.push({
+            type: 'Debugger Statement',
+            message: 'Ditemukan debugger; statement',
+            suggestion: 'Hapus debugger; untuk production code.'
+        });
+    }
+    
+    const looseEquality = detectLooseEquality(code);
+    if (looseEquality.length > 0) {
+        result.suggestions.push({
+            type: 'Loose Equality',
+            message: `Gunakan === bukan == di baris ${looseEquality.join(', ')}`,
+            suggestion: '=== lebih aman karena tidak melakukan type coercion.'
+        });
+    }
+    
+    if (code.match(/\bvar\s+\w+/g)) {
+        result.suggestions.push({
+            type: 'Var Usage',
+            message: 'Menggunakan var, sebaiknya gunakan let atau const',
+            suggestion: 'let dan const memiliki block scope yang lebih aman.'
+        });
+    }
+    
+    if (detectInfiniteLoop(code)) {
+        result.errors.push({
+            message: 'Potensi infinite loop terdeteksi!',
+            suggestion: 'Pastikan loop memiliki kondisi berhenti yang valid.'
+        });
+        result.hasError = true;
+    }
+    
+    if (code.includes('await') && !code.includes('try') && !code.includes('.catch')) {
+        result.warnings.push({
+            type: 'Missing Error Handling',
+            message: 'Async/await tanpa error handling',
+            suggestion: 'Gunakan try-catch atau .catch() untuk handle error.'
+        });
+    }
+    
+    if (code.includes('.then(') && !code.includes('.catch(')) {
+        result.warnings.push({
+            type: 'Unhandled Promise',
+            message: 'Promise tanpa .catch()',
+            suggestion: 'Tambahkan .catch() untuk handle rejection.'
+        });
+    }
+    
+    const lines = code.split('\n');
+    let lineNumbers = '';
+    
+    for (let i = 0; i < Math.min(lines.length, 20); i++) {
+        lineNumbers += `${i+1} | ${lines[i]}\n`;
+    }
+    
+    let response = '';
+    
+    response += '╔════════════════════════════════════╗\n';
+    response += '║     🔍 JAVASCRIPT ERROR CHECKER    ║\n';
+    response += '╚════════════════════════════════════╝\n\n';
+    
+    if (!result.hasError && result.warnings.length === 0 && result.suggestions.length === 0) {
+        response += '✅ *NO ERRORS DETECTED!*\nCode looks clean!\n\n';
+    } else if (result.hasError) {
+        response += '❌ *ERRORS FOUND!*\n\n';
+    } else {
+        response += '⚠️ *WARNINGS & SUGGESTIONS*\n\n';
+    }
+    
+    if (result.errors.length > 0) {
+        response += '🔴 *ERRORS:*\n';
+        for (let err of result.errors) {
+            response += `┌─ ❌ ${err.message}\n`;
+            if (err.line) response += `│  📍 Line: ${err.line}\n`;
+            if (err.column) response += `│  📍 Column: ${err.column}\n`;
+            if (err.suggestion) response += `│  💡 Suggestion: ${err.suggestion}\n`;
+            response += `└─────────────────────────────\n\n`;
+        }
+    }
+    
+    if (result.warnings.length > 0) {
+        response += '🟡 *WARNINGS:*\n';
+        for (let warn of result.warnings) {
+            response += `⚠️ ${warn.type}: ${warn.message}\n`;
+            response += `   💡 ${warn.suggestion}\n\n`;
+        }
+    }
+    
+    if (result.suggestions.length > 0) {
+        response += '💡 *SUGGESTIONS:*\n';
+        for (let sug of result.suggestions) {
+            response += `• ${sug.type}: ${sug.message}\n`;
+            response += `  → ${sug.suggestion}\n\n`;
+        }
+    }
+    
+    response += '\n📝 *CODE PREVIEW:*\n';
+    response += '```javascript\n';
+    response += lineNumbers.substring(0, 1500);
+    if (lines.length > 20) response += `\n... dan ${lines.length - 20} baris lainnya\n`;
+    response += '```\n';
+    
+    response += '\n📊 *STATISTICS:*\n';
+    response += `├─ Total Lines: ${lines.length}\n`;
+    response += `├─ Characters: ${code.length}\n`;
+    response += `├─ Errors: ${result.errors.length}\n`;
+    response += `├─ Warnings: ${result.warnings.length}\n`;
+    response += `└─ Suggestions: ${result.suggestions.length}\n`;
+    
+    await bot.editMessageText(response, {
+        chat_id: chatId,
+        message_id: loadingMsg.message_id,
+        parse_mode: 'Markdown'
+    });
+}
+
+// 4. /fix
+bot.onText(/^\/fix$/, async (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id
+  const chatType = msg.chat.type
+  
+  const hasAccess = await checkUserAccess(userId, chatId, chatType, "fix")
+  if (!hasAccess) return
+  
+  if (!msg.reply_to_message || (!msg.reply_to_message.text && !msg.reply_to_message.document)) {
+    return bot.sendMessage(chatId, "⚠️ Reply ke code JavaScript yang mau diperbaiki!");
+  }
+  
+  let code = '';
+  
+  if (msg.reply_to_message.text) {
+    code = msg.reply_to_message.text;
+  } else if (msg.reply_to_message.document) {
+    const file = await bot.getFile(msg.reply_to_message.document.file_id);
+    const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
+    const response = await axios.get(fileUrl, { responseType: 'text' });
+    code = response.data;
+  }
+  
+  const loading = await bot.sendMessage(chatId, "🔧 Memperbaiki code...");
+  
+  let fixed = code;
+  const fixes = [];
+  
+  if (fixed.includes('console.lg')) {
+    fixed = fixed.replace(/console\.lg/g, 'console.log');
+    fixes.push('Fixed console.lg → console.log');
+  }
+  if (fixed.includes('console.logs')) {
+    fixed = fixed.replace(/console\.logs/g, 'console.log');
+    fixes.push('Fixed console.logs → console.log');
+  }
+  
+  if (fixed.includes(' == ') && !fixed.includes(' === ')) {
+    fixed = fixed.replace(/==(?!=)/g, '===');
+    fixes.push('Changed == to ===');
+  }
+  
+  if (fixed.includes('var ')) {
+    fixed = fixed.replace(/\bvar\s+/g, 'let ');
+    fixes.push('Changed var to let');
+  }
+  
+  const lines = fixed.split('\n');
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i].trim();
+    if (line && !line.endsWith(';') && !line.endsWith('{') && !line.endsWith('}') && 
+        !line.endsWith('(') && !line.startsWith('//') && !line.startsWith('/*')) {
+      if (!line.match(/(if|else|for|while|function|return|=>|,)$/)) {
+        lines[i] += ';';
+        if (fixes.length < 3) fixes.push(`Added semicolon at line ${i+1}`);
+      }
+    }
+  }
+  fixed = lines.join('\n');
+  
+  let open = (fixed.match(/\(/g) || []).length;
+  let close = (fixed.match(/\)/g) || []).length;
+  if (open > close) {
+    fixed += ')'.repeat(open - close);
+    fixes.push('Added missing parentheses');
+  }
+  
+  open = (fixed.match(/\{/g) || []).length;
+  close = (fixed.match(/\}/g) || []).length;
+  if (open > close) {
+    fixed += '}'.repeat(open - close);
+    fixes.push('Added missing brackets');
+  }
+  
+  if (fixed.includes('await') && !fixed.includes('try') && !fixed.includes('.catch')) {
+    fixed = `try {\n${fixed}\n} catch (err) {\n  console.error('Error:', err);\n}`;
+    fixes.push('Added try-catch for async/await');
+  }
+  
+  let isValid = false;
+  try { new Function(fixed); isValid = true; } catch(e) {}
+  
+  await bot.deleteMessage(chatId, loading.message_id);
+  
+  if (fixed !== code) {
+    let msgText = `✅ *CODE DIPERBAIKI!*\n\n`;
+    msgText += `📊 *${fixes.length} perbaikan:*\n`;
+    fixes.slice(0, 5).forEach(f => msgText += `• ${f}\n`);
+    msgText += `\n🟢 *HASIL:*\n\`\`\`javascript\n${fixed.substring(0, 1500)}\n\`\`\``;
+    if (fixed.length > 1500) msgText += `\n\n📁 Code panjang, dikirim sebagai file...`;
+    
+    await bot.sendMessage(chatId, msgText, { parse_mode: 'Markdown' });
+    
+    if (fixed.length > 1500) {
+      const filePath = `fixed_${Date.now()}.js`;
+      fs.writeFileSync(filePath, fixed);
+      await bot.sendDocument(chatId, filePath, { caption: `✅ Fixed code - ${fixes.length} issues fixed` });
+      fs.unlinkSync(filePath);
+    }
+  } else {
+    await bot.sendMessage(chatId, isValid ? "✅ Code sudah benar!" : "❌ Error tidak bisa diperbaiki otomatis. Cek manual.");
+  }
+});
+
+// ================= HELPER FUNCTIONS UNTUK CHECK ================= //
+
+function extractLineNumber(stack) {
+    const match = stack && stack.match(/:(\d+):\d+\)/);
+    return match ? parseInt(match[1]) : null;
+}
+
+function extractColumnNumber(stack) {
+    const match = stack && stack.match(/:(\d+):(\d+)\)/);
+    return match ? parseInt(match[2]) : null;
+}
+
+function detectUndefinedVariables(code) {
+    const defined = new Set();
+    const used = new Set();
+    
+    const declarations = code.match(/(?:let|const|var)\s+(\w+)/g);
+    if (declarations) {
+        declarations.forEach(decl => {
+            const match = decl.match(/\b(\w+)$/);
+            if (match) defined.add(match[1]);
+        });
+    }
+    
+    const words = code.match(/\b[a-zA-Z_$][a-zA-Z0-9_$]*\b/g);
+    if (words) {
+        words.forEach(word => {
+            if (!['let', 'const', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'true', 'false', 'null', 'undefined', 'this', 'new', 'typeof', 'instanceof'].includes(word)) {
+                used.add(word);
+            }
+        });
+    }
+    
+    const builtins = ['console', 'document', 'window', 'Array', 'Object', 'String', 'Number', 'Boolean', 'Function', 'Promise', 'Map', 'Set', 'Date', 'Math', 'JSON', 'parseInt', 'parseFloat', 'isNaN', 'isFinite', 'encodeURI', 'decodeURI', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'];
+    
+    const undefinedVars = [...used].filter(v => !defined.has(v) && !builtins.includes(v));
+    return undefinedVars.slice(0, 5);
+}
+
+function detectMissingSemicolon(code) {
+    const lines = code.split('\n');
+    const missing = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line && !line.endsWith(';') && !line.endsWith('{') && !line.endsWith('}') && !line.endsWith('(') && !line.startsWith('//') && !line.startsWith('/*')) {
+            if (!line.match(/(if|else|for|while|function|return|=>|,)$/)) {
+                missing.push(i + 1);
+            }
+        }
+    }
+    
+    return missing.slice(0, 10);
+}
+
+function detectUnusedVariables(code) {
+    const defined = new Map();
+    const used = new Set();
+    
+    const varPattern = /(?:let|const|var)\s+(\w+)(?:\s*=\s*[^;]+)?/g;
+    let match;
+    while ((match = varPattern.exec(code)) !== null) {
+        defined.set(match[1], { line: getLineNumber(code, match.index) });
+    }
+    
+    const funcPattern = /function\s+\w+\s*\(([^)]*)\)/g;
+    while ((match = funcPattern.exec(code)) !== null) {
+        const params = match[1].split(',').map(p => p.trim());
+        params.forEach(p => {
+            if (p) defined.set(p, { line: getLineNumber(code, match.index) });
+        });
+    }
+    
+    const usagePattern = /\b([a-zA-Z_$][a-zA-Z0-9_$]*)\b/g;
+    while ((match = usagePattern.exec(code)) !== null) {
+        const word = match[1];
+        if (!['let', 'const', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'true', 'false', 'null', 'undefined', 'this', 'new', 'typeof', 'instanceof'].includes(word)) {
+            used.add(word);
+        }
+    }
+    
+    const builtins = ['console', 'document', 'window', 'Array', 'Object', 'String', 'Number', 'Boolean', 'Function', 'Promise', 'Map', 'Set', 'Date', 'Math', 'JSON', 'parseInt', 'parseFloat', 'isNaN', 'isFinite', 'encodeURI', 'decodeURI', 'setTimeout', 'setInterval', 'clearTimeout', 'clearInterval'];
+    
+    const unused = [];
+    for (let [varName, info] of defined) {
+        if (!used.has(varName) && !builtins.includes(varName)) {
+            unused.push(varName);
+        }
+    }
+    
+    return unused.slice(0, 5);
+}
+
+function detectLooseEquality(code) {
+    const lines = code.split('\n');
+    const looseLines = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+        if (lines[i].includes(' == ') && !lines[i].includes(' === ')) {
+            looseLines.push(i + 1);
+        }
+    }
+    
+    return looseLines;
+}
+
+function detectInfiniteLoop(code) {
+    if (code.includes('while (true)') && !code.includes('break')) {
+        return true;
+    }
+    
+    if (code.includes('for (') && code.includes(';;')) {
+        return true;
+    }
+    
+    return false;
+}
+
+function getLineNumber(code, index) {
+    const lines = code.substring(0, index).split('\n');
+    return lines.length;
+}
+
 // ================= FITUR GROUP SECURITY ================= //
 
-// 1. /blokcmd <command>
 bot.onText(/\/blokcmd (.+)/, async (msg, match) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1082,7 +1762,6 @@ bot.onText(/\/blokcmd (.+)/, async (msg, match) => {
   bot.sendMessage(chatId, `✅ Command /${commandName} berhasil diblokir. User tidak akan bisa menggunakan command ini.`)
 })
 
-// 2. /bukacmd <command>
 bot.onText(/\/bukacmd (.+)/, async (msg, match) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1103,7 +1782,6 @@ bot.onText(/\/bukacmd (.+)/, async (msg, match) => {
   bot.sendMessage(chatId, `✅ Command /${commandName} berhasil dibuka. User bisa menggunakan command ini kembali.`)
 })
 
-// 3. /addpremgrup <hari>
 bot.onText(/\/addpremgrup\s+(\d+)([dhm])?/, async (msg, match) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1132,7 +1810,6 @@ bot.onText(/\/addpremgrup\s+(\d+)([dhm])?/, async (msg, match) => {
   bot.sendMessage(chatId, `✅ Grup "${chat.title}" berhasil ditambahkan ke premium selama ${jumlah}${unit === 'd' ? ' hari' : unit === 'h' ? ' jam' : ' bulan'}! Anggota grup dapat mengetik "add" untuk mendapatkan akses premium.`)
 })
 
-// 4. /delpremgrup
 bot.onText(/\/delpremgrup/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1159,7 +1836,6 @@ bot.onText(/\/delpremgrup/, async (msg) => {
   bot.sendMessage(chatId, `✅ Grup "${chat.title}" berhasil dihapus dari daftar premium grup.`)
 })
 
-// 5. /listpremgrub
 bot.onText(/\/listpremgrub/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1196,7 +1872,6 @@ bot.onText(/\/listpremgrub/, async (msg) => {
   bot.sendMessage(chatId, message, { parse_mode: "HTML" })
 })
 
-// 6. /add (di grup premium)
 bot.onText(/^add$/i, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1287,7 +1962,7 @@ async function checkUserAccess(userId, chatId, chatType, commandName) {
   return true
 }
 
-// Command bug dengan pengecekan block
+// Command bug
 bot.onText(/\/Xploit(?:\s+(\d+))?/, async (msg, match) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1462,7 +2137,7 @@ bot.onText(/\/sendbug(?:\s+(\d+))?/, async (msg, match) => {
   }
 })
 
-// Command /reqpair (untuk owner/admin)
+// Command /reqpair
 bot.onText(/\/reqpair (.+)/, async (msg, match) => {
   const chatId = msg.chat.id
   if (!adminUsers.includes(msg.from.id) && !isOwner(msg.from.id)) {
@@ -1493,7 +2168,8 @@ bot.onText(/\/reqpair (.+)/, async (msg, match) => {
   }
 })
 
-// Auto restart jika terjadi error unhandled rejection
+// ================= START ================= //
+
 process.on('unhandledRejection', (reason, promise) => {
   console.error(chalk.red('Unhandled Rejection at:', promise, 'reason:', reason));
 });
@@ -1502,8 +2178,6 @@ process.on('uncaughtException', (error) => {
   console.error(chalk.red('Uncaught Exception:', error));
 });
 
-// Start auto update checker
 startAutoUpdateChecker();
-
-startBot()
-initializeWhatsAppConnections()
+startBot();
+initializeWhatsAppConnections();
