@@ -23,7 +23,7 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.2";
+const CURRENT_VERSION = "3.0.5";
 
 // File untuk menyimpan data
 const GROUP_PREMIUM_FILE = "./database/group_premium.json";
