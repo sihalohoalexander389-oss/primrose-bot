@@ -23,7 +23,7 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.10";
+const CURRENT_VERSION = "3.0.1";
 const AUTO_UPDATE_FILE = "./database/auto_update.json";
 
 // Load auto update setting
@@ -615,7 +615,7 @@ async function sendColoredMenu(chatId, from, color) {
 🎩 Pemilik : @ItsMeXanderRzMd 🌟    
 😄 Owner : @realmarz 🌟
 🍽 Version : 3.0 
-🗡 Platform : Telegram Bug
+🗡 Platform : Telegram
 <blockquote><b>――⧼ STATUS BOT ⧽――</b></blockquote>
 ⛧ Status : ${status}
 ⛧ Number : ${botNumber}
