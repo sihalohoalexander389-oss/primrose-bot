@@ -953,6 +953,8 @@ Command hanya bisa digunakan oleh admin grup</blockquote>`
 ┃      ╰➤ Perbaiki code JavaScript otomatis
 ┃      ▢ /brat &lt;kata-kata&gt;
 ┃      ╰➤ Buat stiker BRAT dari teks
+┃      ▢ /tourl &lt;reply foto atau vidio&gt;
+┃      ╰➤ Buat link dari foto atau vidio
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 <blockquote><b>NOTE:</b>
 Gunakan tools ini untuk testing dan debugging</blockquote>`
