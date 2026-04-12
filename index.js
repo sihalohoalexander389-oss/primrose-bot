@@ -23,7 +23,7 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/ItsMeXanderRzMd/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.1";
+const CURRENT_VERSION = "3.0.2";
 
 // File untuk menyimpan data
 const GROUP_PREMIUM_FILE = "./database/group_premium.json";
@@ -800,7 +800,7 @@ bot.on("callback_query", async (query) => {
 <b>╰➤ hapus bug</b>
 <b>─━━─━━⧼ BUG MENU ⧽─━━─━━:</b>
 # Primrose Linux Bot 𖣂
-─▢ /Xploitt 
+─▢ /Xploit 
 <b>╰➤ blank hard</b>
 ─▢ /Sanjiva
 <b>╰➤ delay hard murbug</b>
