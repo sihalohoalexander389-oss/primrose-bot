@@ -22,7 +22,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
-const GITHUB_RAW_URL = "const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";";
+const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
 const CURRENT_VERSION = "3.0.2";
 
 // File untuk menyimpan data
