@@ -23,7 +23,36 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.5";
+const CURRENT_VERSION = "3.0.4";
+const AUTO_UPDATE_FILE = "./database/auto_update.json";
+
+// Load auto update setting
+let autoUpdateEnabled = true;
+
+function loadAutoUpdateSetting() {
+    try {
+        if (!fs.existsSync(AUTO_UPDATE_FILE)) {
+            fs.writeFileSync(AUTO_UPDATE_FILE, JSON.stringify({ enabled: true }, null, 2));
+            return { enabled: true };
+        }
+        return JSON.parse(fs.readFileSync(AUTO_UPDATE_FILE));
+    } catch (error) {
+        console.error("Error loading auto update setting:", error);
+        return { enabled: true };
+    }
+}
+
+function saveAutoUpdateSetting(enabled) {
+    try {
+        fs.writeFileSync(AUTO_UPDATE_FILE, JSON.stringify({ enabled: enabled }, null, 2));
+    } catch (error) {
+        console.error("Error saving auto update setting:", error);
+    }
+}
+
+// Inisialisasi auto update setting
+const autoUpdateSetting = loadAutoUpdateSetting();
+autoUpdateEnabled = autoUpdateSetting.enabled;
 
 // File untuk menyimpan data
 const GROUP_PREMIUM_FILE = "./database/group_premium.json";
@@ -115,9 +144,6 @@ async function checkForUpdates() {
         const response = await axios.get(GITHUB_RAW_URL, { timeout: 10000 });
         const remoteContent = response.data;
         
-        // Baca file lokal
-        const localContent = fs.readFileSync(__filename, 'utf8');
-        
         // Cek versi (cari CURRENT_VERSION di file remote)
         const remoteVersionMatch = remoteContent.match(/CURRENT_VERSION = "([^"]+)"/);
         const remoteVersion = remoteVersionMatch ? remoteVersionMatch[1] : "unknown";
@@ -135,26 +161,25 @@ async function checkForUpdates() {
     }
 }
 
-// Fungsi untuk melakukan update
+// Fungsi untuk melakukan update (langsung replace file, tanpa backup)
 async function performUpdate(chatId) {
     try {
         const update = await checkForUpdates();
         
         if (!update.hasUpdate) {
-            await bot.sendMessage(chatId, `✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})`);
+            if (chatId) {
+                await bot.sendMessage(chatId, `✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})`);
+            }
             return false;
         }
         
-        // Backup file lama
-        const backupPath = `./backup_index_${Date.now()}.js`;
-        fs.copyFileSync(__filename, backupPath);
-        console.log(chalk.blue(`📁 Backup tersimpan: ${backupPath}`));
-        
-        // Tulis file baru
+        // Tulis file baru langsung (tanpa backup)
         fs.writeFileSync(__filename, update.content);
         console.log(chalk.green("✅ File index.js berhasil diupdate!"));
         
-        await bot.sendMessage(chatId, `✅ Update berhasil! Versi ${CURRENT_VERSION} → ${update.newVersion}\n🔄 Bot akan restart dalam 3 detik...`);
+        if (chatId) {
+            await bot.sendMessage(chatId, `✅ Update berhasil! Versi ${CURRENT_VERSION} → ${update.newVersion}\n🔄 Bot akan restart dalam 3 detik...`);
+        }
         
         // Restart bot
         setTimeout(() => {
@@ -164,8 +189,38 @@ async function performUpdate(chatId) {
         return true;
     } catch (error) {
         console.error(chalk.red("❌ Gagal update:", error.message));
-        await bot.sendMessage(chatId, `❌ Gagal update: ${error.message}`);
+        if (chatId) {
+            await bot.sendMessage(chatId, `❌ Gagal update: ${error.message}`);
+        }
         return false;
+    }
+}
+
+// Fungsi auto update berkala (setiap 1 jam)
+let autoUpdateInterval = null;
+
+function startAutoUpdateChecker() {
+    if (autoUpdateInterval) {
+        clearInterval(autoUpdateInterval);
+    }
+    
+    autoUpdateInterval = setInterval(async () => {
+        if (!autoUpdateEnabled) return;
+        
+        console.log(chalk.cyan("🔄 Auto update check..."));
+        const update = await checkForUpdates();
+        
+        if (update.hasUpdate) {
+            console.log(chalk.yellow(`📦 Auto update ditemukan! Versi ${CURRENT_VERSION} → ${update.newVersion}`));
+            await performUpdate(null);
+        }
+    }, 60 * 60 * 1000); // Cek setiap 1 jam
+}
+
+function stopAutoUpdateChecker() {
+    if (autoUpdateInterval) {
+        clearInterval(autoUpdateInterval);
+        autoUpdateInterval = null;
     }
 }
 
@@ -190,6 +245,7 @@ Informasi:
 Dev : t.me/ItsMeXanderRzMd
 Channel : https://t.me/allteamlinux
 Version: ${CURRENT_VERSION}
+Auto Update: ${autoUpdateEnabled ? "ON" : "OFF"}
 `));
 
 console.log(chalk.blue(`
@@ -559,7 +615,7 @@ async function sendColoredMenu(chatId, from, color) {
 🎩 Pemilik : @ItsMeXanderRzMd 🌟    
 😄 Owner : @realmarz 🌟
 🍽 Version : 3.0 
-🗡 Platform : Telegram Bot Bug WhatsApp 
+🗡 Platform : Telegram Cung
 <blockquote><b>――⧼ STATUS BOT ⧽――</b></blockquote>
 ⛧ Status : ${status}
 ⛧ Number : ${botNumber}
@@ -835,8 +891,10 @@ bot.on("callback_query", async (query) => {
 ┃      ╰➤ Melihat list premium user yang ada
 ┃      ▢ /reqpair ☇ Number
 ┃      ╰➤ Menambah Sender WhatsApp
+┃      ▢ /update on/off
+┃      ╰➤ Mengaktifkan/menonaktifkan auto update
 ┃      ▢ /autoupdate
-┃      ╰➤ Update bot dari GitHub
+┃      ╰➤ Update manual dari GitHub
 ┃      ▢ /checkupdate
 ┃      ╰➤ Cek versi terbaru
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -923,7 +981,30 @@ bot.on("poll_answer", async (answer) => {
 
 // ================= FITUR AUTOUPDATE ================= //
 
-// Command /autoupdate - Update otomatis dari GitHub
+// Command /update on/off - Mengaktifkan/menonaktifkan auto update
+bot.onText(/\/update (on|off)/, async (msg, match) => {
+  const chatId = msg.chat.id
+  const userId = msg.from.id
+  const mode = match[1].toLowerCase()
+  
+  if (!isOwner(userId) && !adminUsers.includes(userId)) {
+    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
+  }
+  
+  if (mode === "on") {
+    autoUpdateEnabled = true;
+    saveAutoUpdateSetting(true);
+    startAutoUpdateChecker();
+    await bot.sendMessage(chatId, `✅ Auto update diaktifkan! Bot akan otomatis update ketika ada versi baru di GitHub.`);
+  } else if (mode === "off") {
+    autoUpdateEnabled = false;
+    saveAutoUpdateSetting(false);
+    stopAutoUpdateChecker();
+    await bot.sendMessage(chatId, `❌ Auto update dinonaktifkan! Gunakan /autoupdate untuk update manual.`);
+  }
+})
+
+// Command /autoupdate - Update manual dari GitHub
 bot.onText(/\/autoupdate/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -971,7 +1052,7 @@ bot.onText(/\/checkupdate/, async (msg) => {
       message_id: statusMsg.message_id
     })
   } else {
-    await bot.editMessageText(`✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})`, {
+    await bot.editMessageText(`✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})\n\nAuto Update: ${autoUpdateEnabled ? "ON (otomatis)" : "OFF (manual)"}`, {
       chat_id: chatId,
       message_id: statusMsg.message_id
     })
@@ -1420,6 +1501,9 @@ process.on('unhandledRejection', (reason, promise) => {
 process.on('uncaughtException', (error) => {
   console.error(chalk.red('Uncaught Exception:', error));
 });
+
+// Start auto update checker
+startAutoUpdateChecker();
 
 startBot()
 initializeWhatsAppConnections()
