@@ -1499,6 +1499,68 @@ bot.onText(/\/brat (.+)/, async (msg, match) => {
   }
 });
 
+// 4. Tourl
+// ================= FITUR TOURL (CONVERT FOTO/VIDEO KE LINK) ================= //
+
+bot.onText(/\/tourl/, async (msg) => {
+  const chatId = msg.chat.id;
+  const userId = msg.from.id;
+  const chatType = msg.chat.type;
+  
+  const hasAccess = await checkUserAccess(userId, chatId, chatType, "tourl");
+  if (!hasAccess) return;
+
+  const replyMsg = msg.reply_to_message;
+  if (!replyMsg) {
+    return bot.sendMessage(chatId, "❌ Format: /tourl (reply dengan foto/video)");
+  }
+
+  let fileId = null;
+  if (replyMsg.photo && replyMsg.photo.length) {
+    fileId = replyMsg.photo[replyMsg.photo.length - 1].file_id;
+  } else if (replyMsg.video) {
+    fileId = replyMsg.video.file_id;
+  } else if (replyMsg.video_note) {
+    fileId = replyMsg.video_note.file_id;
+  } else {
+    return bot.sendMessage(chatId, "❌ Hanya mendukung foto atau video");
+  }
+
+  const waitMsg = await bot.sendMessage(chatId, "⏳ Mengambil file & mengunggah ke catbox...");
+
+  try {
+    const tgLink = await bot.getFileLink(fileId);
+    const tgLinkStr = String(tgLink);
+
+    const params = new URLSearchParams();
+    params.append("reqtype", "urlupload");
+    params.append("url", tgLinkStr);
+
+    const { data } = await axios.post("https://catbox.moe/user/api.php", params, {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      timeout: 30000
+    });
+
+    if (typeof data === "string" && /^https?:\/\/files\.catbox\.moe\//i.test(data.trim())) {
+      await bot.deleteMessage(chatId, waitMsg.message_id);
+      await bot.sendMessage(chatId, data.trim());
+    } else {
+      await bot.editMessageText(`❌ Gagal upload ke catbox: ${String(data).slice(0, 200)}`, {
+        chat_id: chatId,
+        message_id: waitMsg.message_id
+      });
+    }
+  } catch (error) {
+    const errorMsg = error?.response?.status
+      ? `❌ Error ${error.response.status} saat unggah ke catbox`
+      : "❌ Gagal unggah, coba lagi.";
+    await bot.editMessageText(errorMsg, {
+      chat_id: chatId,
+      message_id: waitMsg.message_id
+    });
+  }
+});
+
 // ================= FITUR CHECK & FIX ================= //
 
 bot.onText(/^\/check$/, async (msg) => {
