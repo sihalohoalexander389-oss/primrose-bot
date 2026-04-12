@@ -615,7 +615,7 @@ async function sendColoredMenu(chatId, from, color) {
 🎩 Pemilik : @ItsMeXanderRzMd 🌟    
 😄 Owner : @realmarz 🌟
 🍽 Version : 3.0 
-🗡 Platform : Telegram Cung
+🗡 Platform : Telegram Bug
 <blockquote><b>――⧼ STATUS BOT ⧽――</b></blockquote>
 ⛧ Status : ${status}
 ⛧ Number : ${botNumber}
