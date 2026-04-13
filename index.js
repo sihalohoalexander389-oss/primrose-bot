@@ -17,6 +17,7 @@ const TelegramBot = require("node-telegram-bot-api");
 const acorn = require("acorn");
 const vm = require("vm");
 const BOT_TOKEN = config.BOT_TOKEN;
+const OWNER_ID = config.OWNER_ID;
 const SESSIONS_DIR = "./sessions";
 const SESSIONS_FILE = "./sessions/active_sessions.json";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -25,7 +26,7 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.20";
+const CURRENT_VERSION = "3.0.21";
 const AUTO_UPDATE_FILE = "./database/auto_update.json";
 const PENDING_UPDATE_FILE = "./database/pending_update.json";
 
@@ -53,7 +54,7 @@ function saveAutoUpdateSetting(enabled) {
     }
 }
 
-// Save pending update notification
+// Save pending update notification untuk dikirim ke owner
 function savePendingUpdate(chatId, oldVersion, newVersion) {
     try {
         fs.writeFileSync(PENDING_UPDATE_FILE, JSON.stringify({ chatId, oldVersion, newVersion, timestamp: Date.now() }, null, 2));
@@ -195,15 +196,6 @@ blockedCommands = loadBlockedCommands();
 const colorSetting = loadColorSetting();
 currentColor = colorSetting.color;
 
-// Cek pending update setelah restart
-const pendingUpdate = getPendingUpdate();
-if (pendingUpdate) {
-    setTimeout(() => {
-        console.log(chalk.green(`✅ Update completed! Version ${pendingUpdate.oldVersion} → ${pendingUpdate.newVersion}`));
-        clearPendingUpdate();
-    }, 2000);
-}
-
 // Fungsi untuk mengecek update dari GitHub
 async function checkForUpdates() {
     try {
@@ -239,10 +231,8 @@ async function performUpdate(chatId) {
             return false;
         }
         
-        // Simpan pending update untuk notifikasi setelah restart
-        if (chatId) {
-            savePendingUpdate(chatId, CURRENT_VERSION, update.newVersion);
-        }
+        // Simpan pending update untuk dikirim ke owner setelah restart
+        savePendingUpdate(chatId, CURRENT_VERSION, update.newVersion);
         
         fs.writeFileSync(__filename, update.content);
         console.log(chalk.green("✅ File index.js berhasil diupdate!"));
@@ -324,15 +314,17 @@ console.log(chalk.blue(`
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-// Kirim notifikasi jika ada update yang tertunda
+// Kirim notifikasi ke OWNER jika ada update yang tertunda setelah restart
 setTimeout(async () => {
     const pending = getPendingUpdate();
     if (pending && pending.chatId) {
         try {
-            await bot.sendMessage(pending.chatId, `✅ *VERSI SUDAH NEW!*\n\nVersi ${pending.oldVersion} → ${pending.newVersion}\nSilakan ketik /start untuk menggunakan bot kembali.\n\n© Primrose Linux Bot`, { parse_mode: "Markdown" });
+            // Kirim notifikasi ke owner (bisa juga ke chatId asal)
+            const targetChatId = OWNER_ID;
+            await bot.sendMessage(targetChatId, `✅ *VERSI SUDAH NEW!*\n\nVersi ${pending.oldVersion} → ${pending.newVersion}\nBot telah berhasil diupdate dan restart.\n\nSilakan gunakan bot kembali.\n\n© Primrose Linux Bot`, { parse_mode: "Markdown" });
             clearPendingUpdate();
         } catch (e) {
-            console.error("Error sending pending notification:", e);
+            console.error("Error sending pending notification to owner:", e);
         }
     }
 }, 3000);
@@ -581,7 +573,7 @@ watchFile("./database/premium.json", (data) => (premiumUsers = data));
 watchFile("./database/admin.json", (data) => (adminUsers = data));
 
 function isOwner(userId) {
-  return config.OWNER_ID.includes(userId.toString());
+  return OWNER_ID.toString() === userId.toString();
 }
 
 function getPremiumStatus(userId) {
@@ -695,7 +687,7 @@ async function sendColoredMenu(chatId, from, color, editMessageId = null) {
     keyboard = JSON.parse(JSON.stringify(keyboard).replace(/"style":undefined/g, '"style":null').replace(/"style":null/g, ''))
   }
 
-  const caption = `<blockquote><strong>☠ # Primrose Linux Bot Bug 𖣂 ☠</strong></blockquote>
+  const caption = `<blockquote><strong>☠ # Primrose Linux Bot 𖣂 ☠</strong></blockquote>
 🎩 Pemilik : @ItsMeXanderRzMd 🌟    
 😄 Owner : @realmarz 🌟
 🍽 Version : ${CURRENT_VERSION} 
@@ -1941,7 +1933,7 @@ bot.onText(/\/start/, async (msg) => {
     const userId = from.id;
     const chatType = msg.chat.type;
     const isGroup = chatType === "group" || chatType === "supergroup";
-    const isOwnerUser = config.OWNER_ID.includes(String(userId));
+    const isOwnerUser = OWNER_ID.toString() === userId.toString();
 
     if (!isGroup && !isPremium(userId) && !isOwnerUser) {
         return bot.sendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.");
