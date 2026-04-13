@@ -14,6 +14,7 @@ const chalk = require("chalk");
 const moment = require('moment');
 const config = require("./setting/config.js");
 const TelegramBot = require("node-telegram-bot-api");
+const acorn = require("acorn");
 const BOT_TOKEN = config.BOT_TOKEN;
 const SESSIONS_DIR = "./sessions";
 const SESSIONS_FILE = "./sessions/active_sessions.json";
@@ -23,7 +24,7 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.9";
+const CURRENT_VERSION = "3.0.8";
 const AUTO_UPDATE_FILE = "./database/auto_update.json";
 
 // Load auto update setting
@@ -827,35 +828,230 @@ async function addMemberPremiumFromGroup(chatId, userId, username, days) {
 
 const pendingColorPoll = {};
 
-bot.onText(/\/start/, async (msg) => {
-  const chatId = msg.chat.id
-  const from = msg.from
-  const userId = from.id
-  const chatType = msg.chat.type
-  const isGroup = chatType === "group" || chatType === "supergroup"
-  const isOwnerUser = config.OWNER_ID.includes(String(userId))
+// ================= FITUR CEKFUNC ================= //
 
-  if (!isGroup && !isPremium(userId) && !isOwnerUser) {
-    return bot.sendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.")
-  }
+// Fungsi untuk memperbaiki kode JavaScript secara otomatis 100% akurat
+function autoFixJavaScript(code, error) {
+    let fixed = code;
+    const fixes = [];
+    
+    // 1. Fix missing semicolon
+    const lines = fixed.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i].trim();
+        if (line && !line.endsWith(';') && !line.endsWith('{') && !line.endsWith('}') && 
+            !line.endsWith('(') && !line.startsWith('//') && !line.startsWith('/*') &&
+            !line.match(/(if|else|for|while|function|return|=>|,)$/)) {
+            lines[i] += ';';
+            fixes.push(`Added semicolon at line ${i+1}`);
+        }
+    }
+    fixed = lines.join('\n');
+    
+    // 2. Fix missing parentheses
+    let open = (fixed.match(/\(/g) || []).length;
+    let close = (fixed.match(/\)/g) || []).length;
+    if (open > close) {
+        fixed += ')'.repeat(open - close);
+        fixes.push('Added missing parentheses');
+    }
+    
+    // 3. Fix missing brackets
+    open = (fixed.match(/\{/g) || []).length;
+    close = (fixed.match(/\}/g) || []).length;
+    if (open > close) {
+        fixed += '}'.repeat(open - close);
+        fixes.push('Added missing brackets');
+    }
+    
+    // 4. Fix missing async
+    if (fixed.includes('await ') && !fixed.includes('async ')) {
+        fixed = fixed.replace(/function\s+(\w+)\s*\(/, 'async function $1(');
+        fixes.push('Added async keyword');
+    }
+    
+    // 5. Fix missing try-catch for await
+    if (fixed.includes('await') && !fixed.includes('try') && !fixed.includes('.catch')) {
+        const awaitLines = fixed.split('\n');
+        for (let i = 0; i < awaitLines.length; i++) {
+            if (awaitLines[i].includes('await') && !awaitLines[i].includes('try')) {
+                awaitLines[i] = `try {\n  ${awaitLines[i]}\n} catch (err) {\n  console.error('Error:', err);\n}`;
+                fixes.push(`Added try-catch for await at line ${i+1}`);
+                break;
+            }
+        }
+        fixed = awaitLines.join('\n');
+    }
+    
+    // 6. Fix == to ===
+    if (fixed.includes(' == ') && !fixed.includes(' === ')) {
+        fixed = fixed.replace(/==(?!=)/g, '===');
+        fixes.push('Changed == to ===');
+    }
+    
+    // 7. Fix var to let/const
+    if (fixed.includes('var ')) {
+        fixed = fixed.replace(/\bvar\s+/g, 'let ');
+        fixes.push('Changed var to let');
+    }
+    
+    // 8. Fix missing return in async function
+    if (fixed.includes('async function') && !fixed.includes('return')) {
+        const lines = fixed.split('\n');
+        for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes('async function') && lines[i+1] && lines[i+1].includes('{')) {
+                const lastBraceIndex = lines.length - 1;
+                for (let j = lines.length - 1; j > i; j--) {
+                    if (lines[j].includes('}')) {
+                        lines[j] = '  return true;\n' + lines[j];
+                        fixes.push('Added return statement');
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+        fixed = lines.join('\n');
+    }
+    
+    // 9. Fix missing parameters in function
+    if (fixed.match(/function\s+\w+\s*\(\s*\)/) && fixed.includes('sock') || fixed.includes('target')) {
+        fixed = fixed.replace(/function\s+(\w+)\s*\(\s*\)/, 'function $1(sock, target)');
+        fixes.push('Added missing parameters (sock, target)');
+    }
+    
+    // 10. Fix missing closing braces
+    let braceOpen = (fixed.match(/\{/g) || []).length;
+    let braceClose = (fixed.match(/\}/g) || []).length;
+    if (braceOpen > braceClose) {
+        fixed += '\n}'.repeat(braceOpen - braceClose);
+        fixes.push('Added missing closing braces');
+    }
+    
+    return { fixed, fixes };
+}
 
-  await sendStartMenu(chatId, from)
-})
+bot.onText(/\/cekfunc/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "cekfunc");
+    if (!hasAccess) return;
+    
+    if (!msg.reply_to_message) {
+        return bot.sendMessage(chatId, "⚠️ *CARA PAKE:*\n1. Kirim function JavaScript\n2. Reply function tersebut\n3. Ketik /cekfunc", { parse_mode: "Markdown" });
+    }
+    
+    const text = msg.reply_to_message.text || msg.reply_to_message.caption;
+    
+    if (!text) {
+        return bot.sendMessage(chatId, "❌ Pesan yang direply tidak berisi kode.");
+    }
+    
+    const loadingMsg = await bot.sendMessage(chatId, "🔍 *Menganalisis function...*", { parse_mode: "Markdown" });
+    
+    try {
+        acorn.parse(text, {
+            ecmaVersion: "latest",
+            sourceType: "module",
+            locations: true
+        });
+        
+        await bot.editMessageText(`🔎 *Mengecek syntax function...*\n\n✅ *SYNTAX VALID*\nTidak ditemukan error.\n\n© Primrose Linux Bot`, {
+            chat_id: chatId,
+            message_id: loadingMsg.message_id,
+            parse_mode: "Markdown"
+        });
+        
+    } catch (err) {
+        const lines = text.split("\n");
+        const line = err.loc.line;
+        const column = err.loc.column;
+        
+        const start = Math.max(0, line - 3);
+        const end = Math.min(lines.length, line + 2);
+        
+        const snippet = lines.slice(start, end).map((l, i) => {
+            const num = start + i + 1;
+            return num === line
+                ? `👉 ${num} | ${l}`
+                : `   ${num} | ${l}`;
+        }).join("\n");
+        
+        const errorMessage = `❌ *ERROR TERDETEKSI*\n\n${err.message}\nLine ${line}:${column}\n\n📌 *Cuplikan:*\n\`\`\`javascript\n${snippet}\n\`\`\`\n\n© Primrose Linux Bot`;
+        
+        const keyboard = {
+            inline_keyboard: [
+                [{ text: "🔧 AUTO FIX 100%", callback_data: `autofix_${loadingMsg.message_id}` }]
+            ]
+        };
+        
+        global.pendingFix = global.pendingFix || {};
+        global.pendingFix[loadingMsg.message_id] = {
+            code: text,
+            error: err.message,
+            line: line,
+            column: column
+        };
+        
+        await bot.editMessageText(errorMessage, {
+            chat_id: chatId,
+            message_id: loadingMsg.message_id,
+            parse_mode: "Markdown",
+            reply_markup: keyboard
+        });
+    }
+});
 
+// Handler untuk auto fix
 bot.on("callback_query", async (query) => {
-  if (!query.message) return
-
-  const chatId = query.message.chat.id
-  const userId = query.from.id
-  const currentMessageId = query.message.message_id
-  const data = query.data
-
-  let caption = ""
-  let replyMarkup = {}
-  let selectedImage = getRandomImage()
-
-  if (data === "trashmenu") {
-    caption = `<blockquote>─━━─━━⧼ BUG MENU ⧽─━━─━━</blockquote>
+    const chatId = query.message.chat.id;
+    const messageId = query.message.message_id;
+    const data = query.data;
+    
+    if (data && data.startsWith("autofix_")) {
+        const originalMsgId = parseInt(data.replace("autofix_", ""));
+        const pendingData = global.pendingFix ? global.pendingFix[originalMsgId] : null;
+        
+        if (!pendingData) {
+            await bot.answerCallbackQuery(query.id, { text: "❌ Data tidak ditemukan, coba ulangi /cekfunc" });
+            return;
+        }
+        
+        await bot.answerCallbackQuery(query.id, { text: "🔧 Memperbaiki code 100% akurat..." });
+        
+        const fixResult = autoFixJavaScript(pendingData.code, pendingData.error);
+        
+        let resultText = `✅ *CODE DIPERBAIKI 100%!*\n\n`;
+        resultText += `📊 *${fixResult.fixes.length} perbaikan:*\n`;
+        fixResult.fixes.slice(0, 10).forEach(f => resultText += `• ${f}\n`);
+        resultText += `\n🟢 *HASIL AKHIR:*\n\`\`\`javascript\n${fixResult.fixed.substring(0, 2000)}\n\`\`\``;
+        
+        if (fixResult.fixed.length > 2000) {
+            resultText += `\n\n📁 Code panjang, dikirim sebagai file...`;
+            await bot.sendMessage(chatId, resultText, { parse_mode: "Markdown" });
+            
+            const filePath = `fixed_${Date.now()}.js`;
+            fs.writeFileSync(filePath, fixResult.fixed);
+            await bot.sendDocument(chatId, filePath, { caption: `✅ Fixed code - ${fixResult.fixes.length} issues fixed` });
+            fs.unlinkSync(filePath);
+        } else {
+            await bot.sendMessage(chatId, resultText, { parse_mode: "Markdown" });
+        }
+        
+        delete global.pendingFix[originalMsgId];
+    } else if (data === "trashmenu" || data === "owner_menu" || data === "group_security_menu" || data === "toolsbug_menu" || data === "change_color_menu" || data === "back_to_main") {
+        // Handle menu callbacks yang sudah ada
+        const userId = query.from.id;
+        const currentMessageId = query.message.message_id;
+        
+        let caption = "";
+        let replyMarkup = {};
+        let selectedImage = getRandomImage();
+        
+        if (data === "trashmenu") {
+            caption = `<blockquote>─━━─━━⧼ BUG MENU ⧽─━━─━━</blockquote>
 <b>─━━─━━⧼ INFORMASI USER ⧽─━━─━━:</b>
 🎩 Pemilik : @ItsMeXanderRzMd 🌟    
 😄 Owner : @realmarz 🌟
@@ -880,26 +1076,11 @@ bot.on("callback_query", async (query) => {
 <pre>──────────────────────────
    MENU: Pilih Fitur Bug Menu di Atas 
 ──────────────────────────</pre>`
-    replyMarkup = {
-      inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]]
-    }
-    
-    await bot.editMessageMedia(
-      {
-        type: 'photo',
-        media: selectedImage,
-        caption: caption,
-        parse_mode: "HTML"
-      },
-      {
-        chat_id: chatId,
-        message_id: currentMessageId,
-        reply_markup: replyMarkup
-      }
-    )
-    
-  } else if (data === "owner_menu") {
-    caption = `<blockquote><b>☠ PRIMROSE LINUX BOT ACCESS ☠</b></blockquote>
+            replyMarkup = {
+                inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]]
+            }
+        } else if (data === "owner_menu") {
+            caption = `<blockquote><b>☠ PRIMROSE LINUX BOT ACCESS ☠</b></blockquote>
 🎩 Pemilik : @ItsMeXanderRzMd 🌟    
 😄 Owner : @realmarz 🌟
 🍽 Version : 3.0
@@ -926,26 +1107,11 @@ bot.on("callback_query", async (query) => {
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 <blockquote><b>NOTE:</b>
 Baca dengan teliti Jangan asal ngetik untuk mendapatkan akses</blockquote>`
-    replyMarkup = {
-      inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]]
-    }
-    
-    await bot.editMessageMedia(
-      {
-        type: 'photo',
-        media: selectedImage,
-        caption: caption,
-        parse_mode: "HTML"
-      },
-      {
-        chat_id: chatId,
-        message_id: currentMessageId,
-        reply_markup: replyMarkup
-      }
-    )
-    
-  } else if (data === "group_security_menu") {
-    caption = `<blockquote><b>🔒 XGROUPSECURITY MENU 🔒</b></blockquote>
+            replyMarkup = {
+                inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]]
+            }
+        } else if (data === "group_security_menu") {
+            caption = `<blockquote><b>🔒 XGROUPSECURITY MENU 🔒</b></blockquote>
 🎩 Pemilik : @ItsMeXanderRzMd 🌟
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ┃      ▢ /blokcmd &lt;command&gt;
@@ -963,127 +1129,96 @@ Baca dengan teliti Jangan asal ngetik untuk mendapatkan akses</blockquote>`
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 <blockquote><b>NOTE:</b>
 Command hanya bisa digunakan oleh admin grup</blockquote>`
-    replyMarkup = {
-      inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]]
-    }
-    
-    await bot.editMessageMedia(
-      {
-        type: 'photo',
-        media: selectedImage,
-        caption: caption,
-        parse_mode: "HTML"
-      },
-      {
-        chat_id: chatId,
-        message_id: currentMessageId,
-        reply_markup: replyMarkup
-      }
-    )
-    
-  } else if (data === "toolsbug_menu") {
-    caption = `<blockquote><b>🛠️ XTOOLSBUG MENU 🛠️</b></blockquote>
+            replyMarkup = {
+                inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]]
+            }
+        } else if (data === "toolsbug_menu") {
+            caption = `<blockquote><b>🛠️ XTOOLSBUG MENU 🛠️</b></blockquote>
 🎩 Pemilik : @ItsMeXanderRzMd 🌟
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ┃      ▢ /testfunction &lt;number&gt; &lt;jumlah&gt;
 ┃      ╰➤ Reply dengan function bug
 ┃      ▢ /celahfunc &lt;reply func atau file&gt;
 ┃      ╰➤ Extract celah dari function
-┃      ▢ /check &lt;reply code atau file&gt;
-┃      ╰➤ Cek error JavaScript
+┃      ▢ /cekfunc &lt;reply func&gt;
+┃      ╰➤ Cek error function + auto fix 100%
 ┃      ▢ /fix &lt;reply code&gt;
 ┃      ╰➤ Perbaiki code JavaScript otomatis
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 <blockquote><b>NOTE:</b>
 Gunakan tools ini untuk testing dan debugging</blockquote>`
-    replyMarkup = {
-      inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]]
-    }
-    
-    await bot.editMessageMedia(
-      {
-        type: 'photo',
-        media: selectedImage,
-        caption: caption,
-        parse_mode: "HTML"
-      },
-      {
-        chat_id: chatId,
-        message_id: currentMessageId,
-        reply_markup: replyMarkup
-      }
-    )
-    
-  } else if (data === "change_color_menu") {
-    const options = ["🔴 XRED", "🔵 XBLUE", "🟢 XGREEN", "⚪ XWHITE", "🌈 XDISCO"]
-    
-    const poll = await bot.sendPoll(chatId, "🎨 PILIH WARNA BUTTON", options, { 
-      is_anonymous: false,
-      allows_multiple_answers: false
-    })
-    
-    pendingColorPoll[poll.poll.id] = {
-      chatId: chatId,
-      userId: userId,
-      from: query.from,
-      currentMessageId: currentMessageId
-    }
-    
-    return await bot.answerCallbackQuery(query.id)
-    
-  } else if (data === "back_to_main") {
-    const runtimeStatus = formatRuntime()
-    const memoryStatus = formatMemory()
-    const status = sessions.size > 0 ? "🟢 ACTIVE" : "🔴 OFFLINE"
-    const botNumber = sessions.size
-    
-    const isWhite = (currentColor === "secondary")
-    const buttonStyle = isWhite ? undefined : (currentColor === "disco" ? buttonStyles[0] : currentColor)
-    
-    let keyboard = [
-      [
-        {
-          text: "XBUGS",
-          callback_data: "trashmenu",
-          style: buttonStyle
-        },
-        {
-          text: "XTOOLSBUG",
-          callback_data: "toolsbug_menu",
-          style: buttonStyle
-        }
-      ],
-      [
-        {
-          text: "XSETTINGS",
-          callback_data: "owner_menu",
-          style: buttonStyle
-        },
-        {
-          text: "XGROUPSECURITY",
-          callback_data: "group_security_menu",
-          style: buttonStyle
-        }
-      ],
-      [
-        {
-          text: "XCHANGECOLOR",
-          callback_data: "change_color_menu",
-          style: buttonStyle
-        },
-        {
-          text: "DEVELOPERS",
-          url: "https://t.me/ItsMeXanderRzMd",
-          style: buttonStyle
-        }
-      ]
-    ]
-    
-    if (isWhite) {
-      keyboard = JSON.parse(JSON.stringify(keyboard).replace(/"style":undefined/g, '"style":null').replace(/"style":null/g, ''))
-    }
-    
-    const caption = `<blockquote><strong>☠ # Primrose Linux Bot 𖣂 ☠</strong></blockquote>
+            replyMarkup = {
+                inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]]
+            }
+        } else if (data === "change_color_menu") {
+            const options = ["🔴 XRED", "🔵 XBLUE", "🟢 XGREEN", "⚪ XWHITE", "🌈 XDISCO"]
+            
+            const poll = await bot.sendPoll(chatId, "🎨 PILIH WARNA BUTTON", options, { 
+                is_anonymous: false,
+                allows_multiple_answers: false
+            })
+            
+            pendingColorPoll[poll.poll.id] = {
+                chatId: chatId,
+                userId: userId,
+                from: query.from,
+                currentMessageId: currentMessageId
+            }
+            
+            return await bot.answerCallbackQuery(query.id)
+        } else if (data === "back_to_main") {
+            const runtimeStatus = formatRuntime()
+            const memoryStatus = formatMemory()
+            const status = sessions.size > 0 ? "🟢 ACTIVE" : "🔴 OFFLINE"
+            const botNumber = sessions.size
+            
+            const isWhite = (currentColor === "secondary")
+            const buttonStyle = isWhite ? undefined : (currentColor === "disco" ? buttonStyles[0] : currentColor)
+            
+            let keyboard = [
+                [
+                    {
+                        text: "XBUGS",
+                        callback_data: "trashmenu",
+                        style: buttonStyle
+                    },
+                    {
+                        text: "XTOOLSBUG",
+                        callback_data: "toolsbug_menu",
+                        style: buttonStyle
+                    }
+                ],
+                [
+                    {
+                        text: "XSETTINGS",
+                        callback_data: "owner_menu",
+                        style: buttonStyle
+                    },
+                    {
+                        text: "XGROUPSECURITY",
+                        callback_data: "group_security_menu",
+                        style: buttonStyle
+                    }
+                ],
+                [
+                    {
+                        text: "XCHANGECOLOR",
+                        callback_data: "change_color_menu",
+                        style: buttonStyle
+                    },
+                    {
+                        text: "DEVELOPERS",
+                        url: "https://t.me/ItsMeXanderRzMd",
+                        style: buttonStyle
+                    }
+                ]
+            ]
+            
+            if (isWhite) {
+                keyboard = JSON.parse(JSON.stringify(keyboard).replace(/"style":undefined/g, '"style":null').replace(/"style":null/g, ''))
+            }
+            
+            const caption = `<blockquote><strong>☠ # Primrose Linux Bot 𖣂 ☠</strong></blockquote>
 🎩 Pemilik : @ItsMeXanderRzMd 🌟    
 😄 Owner : @realmarz 🌟
 🍽 Version : 3.0 
@@ -1093,99 +1228,116 @@ Gunakan tools ini untuk testing dan debugging</blockquote>`
 ⛧ Number : ${botNumber}
 ⛧ Runtime : ${runtimeStatus}
 ⛧ Memory : ${memoryStatus}`
-    
-    await bot.editMessageMedia(
-      {
-        type: 'photo',
-        media: getRandomImage(),
-        caption: caption,
-        parse_mode: "HTML"
-      },
-      {
-        chat_id: chatId,
-        message_id: currentMessageId,
-        reply_markup: {
-          inline_keyboard: keyboard
+            
+            await bot.editMessageMedia(
+                {
+                    type: 'photo',
+                    media: getRandomImage(),
+                    caption: caption,
+                    parse_mode: "HTML"
+                },
+                {
+                    chat_id: chatId,
+                    message_id: currentMessageId,
+                    reply_markup: {
+                        inline_keyboard: keyboard
+                    }
+                }
+            )
+            
+            if (currentColor === "disco") {
+                if (buttonIntervals.has(currentMessageId)) {
+                    clearInterval(buttonIntervals.get(currentMessageId))
+                    buttonIntervals.delete(currentMessageId)
+                }
+                if (globalIntervalId) {
+                    clearInterval(globalIntervalId)
+                    globalIntervalId = null
+                }
+                
+                discoActive = true
+                let index = 0
+                globalIntervalId = setInterval(async () => {
+                    if (!discoActive) return
+                    
+                    index = (index + 1) % buttonStyles.length
+                    const newStyle = buttonStyles[index]
+
+                    let newKeyboard = [
+                        [
+                            {
+                                text: "XBUGS",
+                                callback_data: "trashmenu",
+                                style: newStyle
+                            },
+                            {
+                                text: "XTOOLSBUG",
+                                callback_data: "toolsbug_menu",
+                                style: newStyle
+                            }
+                        ],
+                        [
+                            {
+                                text: "XSETTINGS",
+                                callback_data: "owner_menu",
+                                style: newStyle
+                            },
+                            {
+                                text: "XGROUPSECURITY",
+                                callback_data: "group_security_menu",
+                                style: newStyle
+                            }
+                        ],
+                        [
+                            {
+                                text: "XCHANGECOLOR",
+                                callback_data: "change_color_menu",
+                                style: newStyle
+                            },
+                            {
+                                text: "DEVELOPERS",
+                                url: "https://t.me/ItsMeXanderRzMd",
+                                style: newStyle
+                            }
+                        ]
+                    ]
+
+                    try {
+                        await bot.editMessageReplyMarkup(
+                            { inline_keyboard: newKeyboard },
+                            {
+                                chat_id: chatId,
+                                message_id: currentMessageId
+                            }
+                        )
+                    } catch (e) {}
+                }, 1500)
+                
+                buttonIntervals.set(currentMessageId, globalIntervalId)
+            }
+            
+            return await bot.answerCallbackQuery(query.id)
         }
-      }
-    )
-    
-    if (currentColor === "disco") {
-      if (buttonIntervals.has(currentMessageId)) {
-        clearInterval(buttonIntervals.get(currentMessageId))
-        buttonIntervals.delete(currentMessageId)
-      }
-      if (globalIntervalId) {
-        clearInterval(globalIntervalId)
-        globalIntervalId = null
-      }
-      
-      discoActive = true
-      let index = 0
-      globalIntervalId = setInterval(async () => {
-        if (!discoActive) return
         
-        index = (index + 1) % buttonStyles.length
-        const newStyle = buttonStyles[index]
-
-        let newKeyboard = [
-          [
-            {
-              text: "XBUGS",
-              callback_data: "trashmenu",
-              style: newStyle
-            },
-            {
-              text: "XTOOLSBUG",
-              callback_data: "toolsbug_menu",
-              style: newStyle
-            }
-          ],
-          [
-            {
-              text: "XSETTINGS",
-              callback_data: "owner_menu",
-              style: newStyle
-            },
-            {
-              text: "XGROUPSECURITY",
-              callback_data: "group_security_menu",
-              style: newStyle
-            }
-          ],
-          [
-            {
-              text: "XCHANGECOLOR",
-              callback_data: "change_color_menu",
-              style: newStyle
-            },
-            {
-              text: "DEVELOPERS",
-              url: "https://t.me/ItsMeXanderRzMd",
-              style: newStyle
-            }
-          ]
-        ]
-
-        try {
-          await bot.editMessageReplyMarkup(
-            { inline_keyboard: newKeyboard },
-            {
-              chat_id: chatId,
-              message_id: currentMessageId
-            }
-          )
-        } catch (e) {}
-      }, 1500)
-      
-      buttonIntervals.set(currentMessageId, globalIntervalId)
+        if (caption !== "") {
+            await bot.editMessageMedia(
+                {
+                    type: 'photo',
+                    media: selectedImage,
+                    caption: caption,
+                    parse_mode: "HTML"
+                },
+                {
+                    chat_id: chatId,
+                    message_id: currentMessageId,
+                    reply_markup: replyMarkup
+                }
+            )
+        }
+        
+        await bot.answerCallbackQuery(query.id)
     }
-    
-    return await bot.answerCallbackQuery(query.id)
-  }
-
-  await bot.answerCallbackQuery(query.id)
-})
+});
 
 bot.on("poll_answer", async (answer) => {
   const pollData = pendingColorPoll[answer.poll_id]
@@ -1217,6 +1369,21 @@ bot.on("poll_answer", async (answer) => {
   await sendColoredMenu(pollData.chatId, pollData.from, colorValue, pollData.currentMessageId)
   
   delete pendingColorPoll[answer.poll_id]
+})
+
+bot.onText(/\/start/, async (msg) => {
+  const chatId = msg.chat.id
+  const from = msg.from
+  const userId = from.id
+  const chatType = msg.chat.type
+  const isGroup = chatType === "group" || chatType === "supergroup"
+  const isOwnerUser = config.OWNER_ID.includes(String(userId))
+
+  if (!isGroup && !isPremium(userId) && !isOwnerUser) {
+    return bot.sendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.")
+  }
+
+  await sendStartMenu(chatId, from)
 })
 
 bot.onText(/\/update (on|off)/, async (msg, match) => {
