@@ -26,7 +26,7 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.30";
+const CURRENT_VERSION = "3.0.36";
 const AUTO_UPDATE_FILE = "./database/auto_update.json";
 const PENDING_UPDATE_FILE = "./database/pending_update.json";
 
@@ -335,6 +335,119 @@ function ensureFileExists(filePath, defaultData = []) {
 }
 
 let sock;
+let reconnectAttempts = new Map();
+let pingIntervals = new Map();
+
+// Fungsi untuk menjaga koneksi tetap hidup dengan ping
+function startPingInterval(botNumber, ws) {
+    if (pingIntervals.has(botNumber)) {
+        clearInterval(pingIntervals.get(botNumber));
+    }
+    
+    const interval = setInterval(() => {
+        if (ws && ws.user) {
+            ws.sendMessage(botNumber + "@s.whatsapp.net", { text: " " }).catch(() => {});
+        }
+    }, 25000);
+    
+    pingIntervals.set(botNumber, interval);
+}
+
+function stopPingInterval(botNumber) {
+    if (pingIntervals.has(botNumber)) {
+        clearInterval(pingIntervals.get(botNumber));
+        pingIntervals.delete(botNumber);
+    }
+}
+
+// Fungsi reconnect dengan exponential backoff
+async function reconnectWithBackoff(botNumber, attempt = 1) {
+    const maxAttempts = 10;
+    const baseDelay = 5000;
+    const maxDelay = 60000;
+    
+    let delay = Math.min(baseDelay * Math.pow(1.5, attempt - 1), maxDelay);
+    
+    console.log(`🔄 Reconnect attempt ${attempt} for ${botNumber} in ${delay}ms`);
+    
+    setTimeout(async () => {
+        try {
+            await reconnectWhatsApp(botNumber, attempt);
+        } catch (error) {
+            if (attempt < maxAttempts) {
+                await reconnectWithBackoff(botNumber, attempt + 1);
+            } else {
+                console.error(`❌ Failed to reconnect ${botNumber} after ${maxAttempts} attempts`);
+            }
+        }
+    }, delay);
+}
+
+async function reconnectWhatsApp(botNumber, attempt = 1) {
+    try {
+        console.log(`🔄 Reconnecting WhatsApp ${botNumber} (attempt ${attempt})...`);
+        const sessionDir = createSessionDir(botNumber);
+        
+        // Cek apakah creds.json masih ada
+        if (!fs.existsSync(path.join(sessionDir, 'creds.json'))) {
+            console.log(`❌ Creds.json not found for ${botNumber}, removing from active sessions`);
+            removeActiveSession(botNumber);
+            return null;
+        }
+        
+        const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+
+        const newSock = makeWASocket({
+            auth: state,
+            printQRInTerminal: false,
+            logger: P({ level: "silent" }),
+            defaultQueryTimeoutMs: undefined,
+            keepAliveIntervalMs: 60000,
+            connectTimeoutMs: 60000,
+            emitOwnEvents: true,
+            fireInitQueries: true,
+            syncFullHistory: false,
+            markOnlineOnConnect: false,
+            generateHighQualityLinkPreview: false,
+            patchMessageBeforeSending: (msg) => msg,
+        });
+
+        // Hentikan ping interval lama jika ada
+        stopPingInterval(botNumber);
+
+        newSock.ev.on("connection.update", async (update) => {
+            const { connection, lastDisconnect } = update;
+            
+            if (connection === "open") {
+                console.log(`✅ WhatsApp ${botNumber} reconnect success!`);
+                sessions.set(botNumber, newSock);
+                reconnectAttempts.delete(botNumber);
+                startPingInterval(botNumber, newSock);
+            } else if (connection === "close") {
+                const statusCode = lastDisconnect?.error?.output?.statusCode;
+                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                
+                if (shouldReconnect) {
+                    const currentAttempt = (reconnectAttempts.get(botNumber) || 1) + 1;
+                    reconnectAttempts.set(botNumber, currentAttempt);
+                    console.log(`⚠️ WhatsApp ${botNumber} disconnected (${statusCode}), reconnecting...`);
+                    await reconnectWithBackoff(botNumber, currentAttempt);
+                } else {
+                    console.log(`🚫 WhatsApp ${botNumber} logged out, removing session`);
+                    removeActiveSession(botNumber);
+                    stopPingInterval(botNumber);
+                }
+            }
+        });
+
+        newSock.ev.on("creds.update", saveCreds);
+        
+        return newSock;
+    } catch (error) {
+        console.error(`Error reconnecting WhatsApp ${botNumber}:`, error);
+        throw error;
+    }
+}
 
 function saveActiveSessions(botNumber) {
   try {
@@ -355,6 +468,20 @@ function saveActiveSessions(botNumber) {
   }
 }
 
+function removeActiveSession(botNumber) {
+    try {
+        if (fs.existsSync(SESSIONS_FILE)) {
+            let sessionsList = JSON.parse(fs.readFileSync(SESSIONS_FILE));
+            sessionsList = sessionsList.filter(num => num !== botNumber);
+            fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessionsList));
+        }
+        sessions.delete(botNumber);
+        stopPingInterval(botNumber);
+    } catch (error) {
+        console.error("Error removing active session:", error);
+    }
+}
+
 async function initializeWhatsAppConnections() {
   try {
     if (fs.existsSync(SESSIONS_FILE)) {
@@ -371,8 +498,13 @@ async function initializeWhatsAppConnections() {
           printQRInTerminal: true,
           logger: P({ level: "silent" }),
           defaultQueryTimeoutMs: undefined,
-          keepAliveIntervalMs: 30000,
+          keepAliveIntervalMs: 60000,
           connectTimeoutMs: 60000,
+          emitOwnEvents: true,
+          fireInitQueries: true,
+          syncFullHistory: false,
+          markOnlineOnConnect: false,
+          generateHighQualityLinkPreview: false,
         });
 
         await new Promise((resolve, reject) => {
@@ -381,15 +513,17 @@ async function initializeWhatsAppConnections() {
             if (connection === "open") {
               console.log(`Bot ${botNumber} terhubung!`);
               sessions.set(botNumber, sock);
+              startPingInterval(botNumber, sock);
               resolve();
             } else if (connection === "close") {
-              const shouldReconnect =
-                lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+              const statusCode = lastDisconnect?.error?.output?.statusCode;
+              const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
               if (shouldReconnect) {
-                console.log(`Mencoba menghubungkan ulang bot ${botNumber}...`);
-                setTimeout(() => initializeWhatsAppConnections(), 5000);
+                console.log(`Mencoba menghubungkan ulang bot ${botNumber}... (${statusCode || 'unknown'})`);
+                reconnectWithBackoff(botNumber, 1);
+                resolve(); // Resolve agar tidak blocking
               } else {
-                reject(new Error("Koneksi ditutup"));
+                reject(new Error("Koneksi ditutup - logged out"));
               }
             }
           });
@@ -422,7 +556,8 @@ async function ConnectToWhatsApp(botNumber, chatId) {
 `,
       { parse_mode: "HTML" }
     )
-    .then((msg) => msg.message_id);
+    .catch(() => null)
+    .then((msg) => msg ? msg.message_id : null);
 
   const sessionDir = createSessionDir(botNumber);
   const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
@@ -432,8 +567,13 @@ async function ConnectToWhatsApp(botNumber, chatId) {
     printQRInTerminal: false,
     logger: P({ level: "silent" }),
     defaultQueryTimeoutMs: undefined,
-    keepAliveIntervalMs: 30000,
+    keepAliveIntervalMs: 60000,
     connectTimeoutMs: 60000,
+    emitOwnEvents: true,
+    fireInitQueries: true,
+    syncFullHistory: false,
+    markOnlineOnConnect: false,
+    generateHighQualityLinkPreview: false,
   });
 
   sock.ev.on("connection.update", async (update) => {
@@ -442,53 +582,75 @@ async function ConnectToWhatsApp(botNumber, chatId) {
     if (connection === "close") {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       if (statusCode && statusCode >= 500 && statusCode < 600) {
-        await bot.editMessageText(
-          `
+        if (statusMessage) {
+          await bot.editMessageText(
+            `
 <blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
 — Number : ${botNumber}.
-— Status : Not Connected
+— Status : Reconnecting...
 `,
-          {
-            chat_id: chatId,
-            message_id: statusMessage,
-            parse_mode: "HTML",
-          }
-        );
+            {
+              chat_id: chatId,
+              message_id: statusMessage,
+              parse_mode: "HTML",
+            }
+          ).catch(() => {});
+        }
         setTimeout(() => ConnectToWhatsApp(botNumber, chatId), 5000);
-      } else {
-        await bot.editMessageText(
-          `
+      } else if (statusCode === DisconnectReason.loggedOut) {
+        if (statusMessage) {
+          await bot.editMessageText(
+            `
 <blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
 — Number : ${botNumber}.
 — Status : Gagal ❌
 `,
-          {
-            chat_id: chatId,
-            message_id: statusMessage,
-            parse_mode: "HTML",
-          }
-        );
+            {
+              chat_id: chatId,
+              message_id: statusMessage,
+              parse_mode: "HTML",
+            }
+          ).catch(() => {});
+        }
         try {
           fs.rmSync(sessionDir, { recursive: true, force: true });
         } catch (error) {
           console.error("Error deleting session:", error);
         }
-      }
-    } else if (connection === "open") {
-      sessions.set(botNumber, sock);
-      saveActiveSessions(botNumber);
-      await bot.editMessageText(
-        `
+      } else {
+        if (statusMessage) {
+          await bot.editMessageText(
+            `
 <blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
 — Number : ${botNumber}.
 — Status : Connected
 `,
-        {
-          chat_id: chatId,
-          message_id: statusMessage,
-          parse_mode: "HTML",
+            {
+              chat_id: chatId,
+              message_id: statusMessage,
+              parse_mode: "HTML",
+            }
+          ).catch(() => {});
         }
-      );
+      }
+    } else if (connection === "open") {
+      sessions.set(botNumber, sock);
+      saveActiveSessions(botNumber);
+      startPingInterval(botNumber, sock);
+      if (statusMessage) {
+        await bot.editMessageText(
+          `
+<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
+— Number : ${botNumber}.
+— Status : Connected ✅
+`,
+          {
+            chat_id: chatId,
+            message_id: statusMessage,
+            parse_mode: "HTML",
+          }
+        ).catch(() => {});
+      }
     } else if (connection === "connecting") {
       await sleep(1000);
       try {
@@ -497,32 +659,36 @@ async function ConnectToWhatsApp(botNumber, chatId) {
           const code = await sock.requestPairingCode(botNumber, customcode);
           const formattedCode = code.match(/.{1,4}/g)?.join("-") || code;
 
+          if (statusMessage) {
+            await bot.editMessageText(
+              `
+<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
+— Number : ${botNumber}.
+— Code Pairing : ${formattedCode}
+`,
+              {
+                chat_id: chatId,
+                message_id: statusMessage,
+                parse_mode: "HTML",
+            }).catch(() => {});
+          }
+        }
+      } catch (error) {
+        console.error("Error requesting pairing code:", error);
+        if (statusMessage) {
           await bot.editMessageText(
             `
 <blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
 — Number : ${botNumber}.
-— Code Pairing : ${formattedCode}
+— Status : Error ❌ ${error.message}
 `,
             {
               chat_id: chatId,
               message_id: statusMessage,
               parse_mode: "HTML",
-          });
+            }
+          ).catch(() => {});
         }
-      } catch (error) {
-        console.error("Error requesting pairing code:", error);
-        await bot.editMessageText(
-          `
-<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
-— Number : ${botNumber}.
-— Status : Error ❌ ${error.message}
-`,
-          {
-            chat_id: chatId,
-            message_id: statusMessage,
-            parse_mode: "HTML",
-          }
-        );
       }
     }
   });
