@@ -26,7 +26,7 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.28";
+const CURRENT_VERSION = "3.0.29";
 const AUTO_UPDATE_FILE = "./database/auto_update.json";
 const PENDING_UPDATE_FILE = "./database/pending_update.json";
 
@@ -2524,7 +2524,7 @@ bot.onText(/\/Chatms(?:\s+(\d+))?/, async (msg, match) => {
    
     for (let i = 0; i < 500; i++) {
         await FCinvisTes(sock, target);
-        await sleep(5000);
+        await sleep(3000);
     }
 });
 
