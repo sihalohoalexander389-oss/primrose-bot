@@ -26,7 +26,7 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.27";
+const CURRENT_VERSION = "3.0.28";
 const AUTO_UPDATE_FILE = "./database/auto_update.json";
 const PENDING_UPDATE_FILE = "./database/pending_update.json";
 
@@ -2298,7 +2298,7 @@ async function Zxxcontact(sock, target) {
   }
 }
 
-async function FCinvis(sock, target) {
+async function FCinvisTes(sock, target) {
   const message = {
     "groupStatusMessageV2": {
       "message": {
@@ -2521,10 +2521,10 @@ bot.onText(/\/Chatms(?:\s+(\d+))?/, async (msg, match) => {
         parse_mode: "HTML",
         reply_markup: createCheckButton(targetNumber)
     });
-    
+   
     for (let i = 0; i < 500; i++) {
-        await StickerFC(sock, target);
-        await sleep(100);
+        await FCinvisTes(sock, target);
+        await sleep(5000);
     }
 });
 
